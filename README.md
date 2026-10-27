@@ -13,6 +13,7 @@ CLI are likely to work, but have not been tested.
 | --- | --- | --- |
 | `glitchwrks.fastiron.fastiron` | cliconf | Reads and changes configuration for `ansible.netcommon.cli_command` and `ansible.netcommon.cli_config` |
 | `glitchwrks.fastiron.fastiron` | terminal | Recognizes FastIron prompts and errors, turns off paging, and enters privileged EXEC mode |
+| `glitchwrks.fastiron.fastiron_ssh_keys` | module | Sets the list of public keys the switch accepts for SSH logins |
 | `glitchwrks.fastiron.fastiron_parse_config` | filter | Parses a running configuration into VLANs, LAGs, VE addresses and MCT clusters |
 | `glitchwrks.fastiron.fastiron_mct_audit` | filter | Checks one switch's MCT clusters against the Ruckus MCT design rules |
 | `glitchwrks.fastiron.fastiron_mct_compare` | filter | Checks that two MCT peers agree |
@@ -80,6 +81,33 @@ ansible_become_password: "{{ vault_enable_password }}"
 Sessions log in to user EXEC mode (`>`). With `ansible_become`, the terminal plugin runs `enable`
 and answers the password prompt. When no enable password is set on the switch, `enable` succeeds
 without one.
+
+### Logging in with SSH keys
+
+FastIron handles SSH keys differently from OpenSSH:
+
+- The switch keeps a single list of public keys, not one per user. Any listed key logs in as an
+  anonymous super-user, whatever username the client gives, and `show who` names no user for the
+  session. Treat the list like root's `authorized_keys`, and keep the enable password set.
+- FastIron 08.0.30 accepts RSA keys of up to 2048 bits and DSA keys. Ed25519 and larger RSA keys
+  are not accepted, so the control node usually needs a separate key for the switches:
+  ```sh
+  ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa_fastiron
+  ```
+- The list is kept outside the configuration. Each upload replaces the whole list, and it is kept
+  across a reload without `write memory`.
+
+Set the list with `glitchwrks.fastiron.fastiron_ssh_keys`, and point the connection at the key.
+libssh only offers `ssh-rsa` signatures when asked to:
+
+```yaml
+# group_vars/fastiron.yml
+ansible_private_key_file: ~/.ssh/id_rsa_fastiron
+ansible_libssh_publickey_algorithms: +ssh-rsa
+```
+
+Turning password logins off with `ip ssh password-authentication no` applies to every user, so
+local accounts can then only log in on the console.
 
 ## Usage
 

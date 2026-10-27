@@ -8,6 +8,10 @@ releases:
         a failover exposes them.
     fragments:
     - 0.1.0.yml
+    modules:
+    - description: Manage the SSH client public keys of a FastIron switch.
+      name: fastiron_ssh_keys
+      namespace: ''
     plugins:
       cliconf:
       - description: Cliconf plugin for Brocade / Ruckus FastIron switches.
