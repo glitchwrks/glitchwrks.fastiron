@@ -1,0 +1,92 @@
+Current configuration:
+!
+ver 08.0.30uT323
+!
+stack unit 1
+  module 1 icx6650-64-56-port-management-module
+  module 2 icx6650-64-4-port-160g-module
+  module 3 icx6650-64-8-port-80g-module
+!
+!
+!
+lag "MCT_lag1" static id 2
+ ports ethernet 1/1/7 to 1/1/8
+ primary-port 1/1/7
+ deploy
+!
+lag "lag_agg_b_2" dynamic id 104
+ ports ethernet 1/1/2
+ primary-port 1/1/2
+ deploy
+!
+!
+vlan 1 name DEFAULT-VLAN by port
+ router-interface ve 1
+!
+vlan 1000 by port
+ tagged ethe 1/1/2 ethe 1/1/7 to 1/1/8
+!
+vlan 3000 name Session-VLAN by port
+ tagged ethe 1/1/7 to 1/1/8
+ router-interface ve 3000
+!
+vlan 3001 name MCT-keep-alive by port
+ tagged ethe 1/1/7 to 1/1/8
+!
+!
+!
+!
+fpod-40g-enable group 1
+fpod-40g-enable group 2
+fpod-40g-enable group 3
+aaa authentication web-server default local
+aaa authentication login default local
+enable aaa console
+hostname cs1b.example.net
+ip dhcp-client disable
+!
+no telnet server
+username admin password .....
+!
+!
+no web-management http
+!
+!
+!
+!
+!
+!
+!
+interface ethernet 1/1/2
+ speed-duplex 1000-full-master
+!
+interface ethernet 1/1/9
+ speed-duplex 1000-full-master
+!
+interface ve 1
+ ip address 10.0.0.3 255.255.255.0
+!
+interface ve 3000
+ ip address 10.0.1.3 255.255.255.0
+!
+!
+!
+!
+cluster ALB-CORE 4000
+ rbridge-id 3
+ session-vlan 3000
+ keep-alive-vlan 3001
+ icl ALB-CORE-MCT ethernet 1/1/7
+ peer 10.0.1.2 rbridge-id 2 icl ALB-CORE-MCT
+ deploy
+ client c2960g
+  rbridge-id 200
+  client-interface ethernet 1/1/2
+  deploy
+!
+!
+!
+!
+!
+!
+end

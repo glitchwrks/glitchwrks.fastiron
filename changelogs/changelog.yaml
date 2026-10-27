@@ -1,0 +1,26 @@
+ancestor: null
+releases:
+  0.1.0:
+    changes:
+      release_summary: Initial release. Ansible support for Brocade / Ruckus FastIron
+        switches over ``network_cli``, tested against ICX 6650 switches running FastIron
+        08.0.30, with filters that check MCT cluster configurations for mistakes before
+        a failover exposes them.
+    fragments:
+    - 0.1.0.yml
+    plugins:
+      cliconf:
+      - description: Cliconf plugin for Brocade / Ruckus FastIron switches.
+        name: fastiron
+        namespace: null
+      filter:
+      - description: Check a FastIron switch's MCT configuration for mistakes.
+        name: fastiron_mct_audit
+        namespace: null
+      - description: Check that two FastIron MCT peers agree.
+        name: fastiron_mct_compare
+        namespace: null
+      - description: Parse a FastIron running configuration.
+        name: fastiron_parse_config
+        namespace: null
+    release_date: '2026-10-27'

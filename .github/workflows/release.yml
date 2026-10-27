@@ -1,0 +1,57 @@
+name: release
+
+# Publishes the collection to Ansible Galaxy and creates a GitHub release
+# when a version tag (for example 0.2.0) is pushed. The tag must match the
+# version in galaxy.yml. Requires the GALAXY_API_KEY repository secret.
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install ansible-core
+        run: python -m pip install ansible-core
+
+      - name: Check that the tag matches galaxy.yml
+        run: |
+          version=$(python -c "import yaml; print(yaml.safe_load(open('galaxy.yml'))['version'])")
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match galaxy.yml version $version"
+            exit 1
+          fi
+
+      - name: Build the collection
+        run: ansible-galaxy collection build --output-path dist
+
+      - name: Publish to Ansible Galaxy
+        env:
+          GALAXY_API_KEY: ${{ secrets.GALAXY_API_KEY }}
+        run: |
+          if [ -z "$GALAXY_API_KEY" ]; then
+            echo "::error::The GALAXY_API_KEY repository secret is not set"
+            exit 1
+          fi
+          ansible-galaxy collection publish "dist/glitchwrks-fastiron-${GITHUB_REF_NAME}.tar.gz" --token "$GALAXY_API_KEY"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/glitchwrks-fastiron-${GITHUB_REF_NAME}.tar.gz" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/CHANGELOG.md) for details."
