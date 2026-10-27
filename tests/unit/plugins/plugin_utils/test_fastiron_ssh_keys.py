@@ -68,5 +68,18 @@ def test_parses_switch_output_with_headers_and_prompt_noise():
     assert parse_client_pub_keys(output) == [body]
 
 
+def test_parses_output_captured_from_an_icx6650():
+    # Layout of "show ip client-pub-key" on FastIron 08.0.30, with a test key: the
+    # switch keeps the comment ssh-keygen added, cut short, and 70-column lines.
+    body = key('rsa2048.pub').split()[1]
+    wrapped = '\n'.join(body[i:i + 70] for i in range(0, len(body), 70))
+    output = ('---- BEGIN SSH2 PUBLIC KEY ----\n'
+              'Comment: "2048-bit RSA, converted by admin@host.example.net from Op"\n'
+              '%s\n'
+              '---- END SSH2 PUBLIC KEY ----\n'
+              '\n' % wrapped)
+    assert parse_client_pub_keys(output) == [body]
+
+
 def test_no_keys():
     assert parse_client_pub_keys('') == []
