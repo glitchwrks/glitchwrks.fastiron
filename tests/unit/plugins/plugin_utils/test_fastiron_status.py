@@ -155,6 +155,16 @@ def test_icl_down(name, peer):
     ]
 
 
+@pytest.mark.parametrize('name', ['cs1a_show_cluster_keep_alive_down.txt', 'cs1b_show_cluster_keep_alive_down.txt'])
+def test_keep_alive_link_down(name):
+    # Captured with the keep-alive link (on its own port, not the ICL) unplugged. cs1a still shows
+    # the reason for an earlier CCP outage, which doesn't matter while CCP is up.
+    findings = mct_health(parse_cluster_status(fixture(name)))
+    assert [(f['severity'], f['rule'], f['message']) for f in findings] == [
+        ('error', 'keep_alive_unreachable',
+         'cluster ALB-CORE: peer not reachable over keep-alive VLAN 3001 (Peer Unreachable)')]
+
+
 def test_split_brain_when_both_switches_are_master():
     a = parse_cluster_status(fixture('cs1a_show_cluster_icl_down.txt'))
     b = parse_cluster_status(fixture('cs1b_show_cluster_icl_down.txt'))
@@ -167,6 +177,7 @@ def test_split_brain_when_both_switches_are_master():
 @pytest.mark.parametrize('a, b', [
     ('cs1b_show_cluster.txt', 'cs1b_show_cluster.txt'),
     ('cs1a_show_cluster_client_remote_up.txt', 'cs1b_show_cluster_client_local_up.txt'),
+    ('cs1a_show_cluster_keep_alive_down.txt', 'cs1b_show_cluster_keep_alive_down.txt'),
 ])
 def test_no_split_brain(a, b):
     assert mct_health_compare(parse_cluster_status(fixture(a)), parse_cluster_status(fixture(b))) == []
