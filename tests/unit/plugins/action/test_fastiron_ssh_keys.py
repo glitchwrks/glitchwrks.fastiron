@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ansible.errors import AnsibleError
 from ansible.playbook.task import Task
 
 from ansible_collections.glitchwrks.fastiron.plugins.action.fastiron_ssh_keys import ActionModule
@@ -28,12 +29,14 @@ DSA = key('dsa.pub')
 
 
 class FakeSwitch:
-    """Stands in for the persistent connection: a key list and an SCP upload."""
+    """Stands in for the switch: its key list, read over the persistent connection's
+    CLI session, and SCP uploads, made over a separate SSH connection."""
 
     def __init__(self, keys=()):
         self.listing = to_rfc4716([k.split()[1] for k in keys]) if keys else ''
         self.uploads = []
         self.accept_uploads = True
+        self.ssh = MagicMock()
 
     def get(self, command):
         assert command == 'show ip client-pub-key'
@@ -58,35 +61,51 @@ def switch(mocker):
     return fake
 
 
-def run(keys, check_mode=False, diff=False, connection='ansible.netcommon.network_cli'):
+def run(switch, keys, check_mode=False, diff=False, connection='ansible.netcommon.network_cli'):
     task = Task()
     task.action = 'glitchwrks.fastiron.fastiron_ssh_keys'
     task.args = {'keys': keys}
     task.check_mode = check_mode
     task.diff = diff
     play_context = MagicMock(connection=connection, check_mode=check_mode)
-    action = ActionModule(task, MagicMock(socket_path='/dev/null'), play_context,
+    task_connection = MagicMock(socket_path='/dev/null', ssh_type='libssh', ssh_type_conn=switch.ssh)
+    task_connection.copy_file.side_effect = switch.copy_file
+    action = ActionModule(task, task_connection, play_context,
                           loader=None, templar=None, shared_loader_obj=None)
     return action.run(task_vars={})
 
 
 def test_uploads_when_the_list_differs(switch):
     switch.listing = to_rfc4716([DSA.split()[1]])
-    result = run([RSA])
+    result = run(switch, [RSA])
     assert result['changed'] is True
     assert not result.get('failed')
     assert switch.uploads == [('sshPubKey', 'scp', to_rfc4716([RSA.split()[1]]))]
+    # The separate SSH connection used for the upload is closed again.
+    switch.ssh.close.assert_called_once_with()
 
 
 def test_no_upload_when_the_list_matches_in_any_order(switch):
     switch.listing = to_rfc4716([DSA.split()[1], RSA.split()[1]])
-    result = run([RSA, DSA, RSA])
+    result = run(switch, [RSA, DSA, RSA])
     assert result['changed'] is False
     assert switch.uploads == []
+    switch.ssh.close.assert_not_called()
+
+
+def test_failed_upload_connection_is_reported(switch):
+    def refuse(**kwargs):
+        raise AnsibleError('ssh connect failed')
+    switch.copy_file = refuse
+    # A libssh connection that never connected has no session to close.
+    del switch.ssh.ssh
+    with pytest.raises(AnsibleError, match='ssh connect failed'):
+        run(switch, [RSA])
+    switch.ssh.close.assert_not_called()
 
 
 def test_check_mode_reports_the_change_without_uploading(switch):
-    result = run([RSA], check_mode=True, diff=True)
+    result = run(switch, [RSA], check_mode=True, diff=True)
     assert result['changed'] is True
     assert switch.uploads == []
     assert result['diff']['before'] == ''
@@ -95,7 +114,7 @@ def test_check_mode_reports_the_change_without_uploading(switch):
 
 def test_fails_when_the_switch_ignores_the_upload(switch):
     switch.accept_uploads = False
-    result = run([RSA])
+    result = run(switch, [RSA])
     assert result['failed'] is True
     assert 'does not list the uploaded keys' in result['msg']
 
@@ -105,13 +124,13 @@ def test_fails_when_the_switch_ignores_the_upload(switch):
     ([key('rsa4096.pub')], 'over 2048 bits'),
 ])
 def test_rejects_unusable_keys_before_touching_the_switch(switch, keys, message):
-    result = run(keys)
+    result = run(switch, keys)
     assert result['failed'] is True
     assert message in result['msg']
     assert switch.uploads == []
 
 
 def test_requires_network_cli(switch):
-    result = run([RSA], connection='ansible.builtin.ssh')
+    result = run(switch, [RSA], connection='ansible.builtin.ssh')
     assert result['failed'] is True
     assert switch.uploads == []
