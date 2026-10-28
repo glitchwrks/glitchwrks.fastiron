@@ -1,0 +1,31 @@
+
+Cluster ALB-CORE 4000
+==================
+Rbridge Id: 2, Session Vlan: 3000, Keep-Alive Vlan: 3001
+Cluster State: Deploy
+Client Isolation Mode: Loose
+Member Vlan Range: 1000 3001
+MCT Peer's Reachability using Keep-Alive Vlan: Peer Unreachable
+
+ ICL Info:
+ ---------
+ Name            Port   Trunk
+ ALB-CORE-MCT    1/1/7  2
+
+ Peer Info:
+ ----------
+ Peer IP: 10.0.1.3, Peer Rbridge Id: 3, ICL: ALB-CORE-MCT
+ KeepAlive Interval: 10 , Hold Time: 90, Fast Failover
+ Active Vlan Range:  1000 3001
+ Last Reason for CCP Down: ICL interface down
+ Peer State: CCP Down (CCP is Down)
+ Reason for CCP Down: ICL interface down
+ Sequence Number Sent: 216
+ Sequence Number Received: 0
+ Number of Out-Of-Sequence Packets Received: 0
+
+ Client Info:
+ ------------
+ Number of Clients configured: 1
+ Name                     Rbridge-id Config      Port  Trunk FSM-State
+ c2960g                   200        Deployed    1/1/2    104  Master

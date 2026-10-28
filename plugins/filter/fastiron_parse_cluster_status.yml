@@ -38,8 +38,8 @@ RETURN:
         (for example V(Peer Reachable)).
       - C(icl) has C(name), C(port) and C(trunk).
       - C(peers) is a list; each peer has C(address), C(rbridge_id), C(icl), C(keep_alive_interval),
-        C(hold_time), C(fast_failover), C(active_vlans), C(last_ccp_down_reason), C(state) (for
-        example V(CCP Up)) and C(state_detail).
+        C(hold_time), C(fast_failover), C(active_vlans), C(last_ccp_down_reason), C(ccp_down_reason)
+        (only shown while the session is down), C(state) (for example V(CCP Up)) and C(state_detail).
       - C(clients_configured) is the number of clients the switch reports, and C(clients) maps each
         client name to its C(rbridge_id), C(config) (for example V(Deployed)), C(port), C(trunk) and
         C(state) (for example V(Up)).

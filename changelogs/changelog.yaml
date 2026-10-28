@@ -34,6 +34,9 @@ releases:
       - description: Check the live state of a FastIron switch's MCT clusters.
         name: fastiron_mct_health
         namespace: null
+      - description: Check the live state of two FastIron MCT peers together.
+        name: fastiron_mct_health_compare
+        namespace: null
       - description: Validate a FastIron configuration model.
         name: fastiron_model_config
         namespace: null
