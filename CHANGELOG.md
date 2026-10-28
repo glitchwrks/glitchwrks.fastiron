@@ -30,6 +30,7 @@ Initial release\. Ansible support for Brocade / Ruckus FastIron switches over <c
 
 * glitchwrks\.fastiron\.fastiron\_config\_commands \- Generate the FastIron commands that bring a switch closer to a model\.
 * glitchwrks\.fastiron\.fastiron\_config\_drift \- Compare a FastIron running configuration with a model\.
+* glitchwrks\.fastiron\.fastiron\_config\_removals \- Generate the FastIron commands that remove ports a model does not list\.
 * glitchwrks\.fastiron\.fastiron\_mct\_audit \- Check a FastIron switch\'s MCT configuration for mistakes\.
 * glitchwrks\.fastiron\.fastiron\_mct\_compare \- Check that two FastIron MCT peers agree\.
 * glitchwrks\.fastiron\.fastiron\_mct\_health \- Check the live state of a FastIron switch\'s MCT clusters\.

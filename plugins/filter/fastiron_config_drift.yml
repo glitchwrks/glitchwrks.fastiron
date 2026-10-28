@@ -25,6 +25,22 @@ DOCUMENTATION:
       description: The model.
       type: dict
       required: true
+    remove:
+      description:
+        - What P(glitchwrks.fastiron.fastiron_config_removals#filter) is used to remove. Differences it
+          fixes are reported as fixable.
+      type: list
+      elements: string
+      choices:
+        vlan_ports: Ports on VLANs in the model that the model does not list.
+      default: []
+    protected_vlans:
+      description:
+        - VLANs whose ports are never removed. Each cluster's session VLAN is always protected.
+        - Extra ports on them are reported as not fixable.
+      type: list
+      elements: int
+      default: []
 
 EXAMPLES: |
   - name: Get the running configuration
@@ -41,9 +57,9 @@ RETURN:
     description:
       - A list of differences, empty when the switch matches the model.
       - Each has C(severity) (C(error) or C(warning)), C(rule), C(object) (such as C(vlan 1000)), C(message),
-        and C(fixable), which is true when P(glitchwrks.fastiron.fastiron_config_commands#filter) generates
-        commands for it.
-      - Differences that need something removed, or a LAG or cluster changed in place, are not fixable, since
-        that usually means undeploying it first.
+        and C(fixable), which is true when P(glitchwrks.fastiron.fastiron_config_commands#filter), or for the
+        kinds in O(remove), P(glitchwrks.fastiron.fastiron_config_removals#filter), generates commands for it.
+      - Other differences that need something removed, or a LAG or cluster changed in place, are not fixable,
+        since that usually means undeploying it first.
     type: list
     elements: dict

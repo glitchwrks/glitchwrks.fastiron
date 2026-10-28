@@ -63,3 +63,14 @@ def test_mct_health_takes_text_or_parsed_status():
 def test_mct_health_rejects_other_input():
     with pytest.raises(AnsibleFilterError, match='fastiron_mct_health'):
         FilterModule().filters()['fastiron_mct_health'](42)
+
+
+def test_removals_filter(cs1a):
+    filters = FilterModule().filters()
+    model = filters['fastiron_parse_config'](cs1a)
+    model = {key: model[key] for key in ('vlans', 'lags', 've_addresses', 'clusters')}
+    model['vlans'][3001]['tagged'] = ['1/1/40']
+    assert filters['fastiron_config_removals'](cs1a, model) == ['vlan 3001', ' no tagged ethe 1/1/7 to 1/1/8']
+    assert filters['fastiron_config_removals'](cs1a, model, protected_vlans=[3001]) == []
+    with pytest.raises(AnsibleFilterError, match='fastiron_config_drift: remove must be'):
+        filters['fastiron_config_drift'](cs1a, model, remove=['everything'])

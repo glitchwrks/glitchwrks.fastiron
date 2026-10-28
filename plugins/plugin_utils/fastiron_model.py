@@ -31,6 +31,9 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
 )
 
 SECTIONS = ('vlans', 'lags', 've_addresses', 'clusters')
+# What config_removals() can remove, when asked to. Nothing is removed by
+# default.
+REMOVABLE = ('vlan_ports',)
 LAG_TYPES = ('static', 'dynamic')
 
 
@@ -227,14 +230,38 @@ def _interfaces(addresses):
     return {ipaddress.ip_interface(a.replace(' ', '/')) for a in addresses}
 
 
-def config_drift(running, model):
+def _removal_settings(current, want, remove, protected_vlans):
+    """Validate the removal settings. Returns (set of removable kinds, set of protected VLAN ids).
+
+    Each cluster's session VLAN, in the model or on the switch, is always
+    protected: removing it from the ICL breaks the cluster's control link.
+    """
+    if remove is None:
+        remove = []
+    if not is_sequence(remove) or any(kind not in REMOVABLE for kind in remove):
+        raise FastIronConfigError('remove must be a list of: %s' % ', '.join(REMOVABLE))
+    if protected_vlans is None:
+        protected_vlans = []
+    if not is_sequence(protected_vlans):
+        raise FastIronConfigError('protected_vlans must be a list of VLAN ids')
+    protected = {_number(vid, 'protected VLAN') for vid in protected_vlans}
+    for clusters in (current['clusters'], want.get('clusters', {})):
+        for cluster in clusters.values():
+            if cluster.get('session_vlan') is not None:
+                protected.add(cluster['session_vlan'])
+    return set(remove), protected
+
+
+def config_drift(running, model, remove=None, protected_vlans=None):
     """Compare a running configuration (text or parsed) with a model.
 
     Returns findings: dictionaries with severity (error or warning), rule,
-    object, message, and fixable (whether config_commands() fixes it).
+    object, message, and fixable (whether config_commands() or, for the kinds
+    in remove, config_removals() fixes it).
     """
     current = _parsed(running)
     want, managed = normalize_model(model)
+    removable, protected = _removal_settings(current, want, remove, protected_vlans)
     findings = []
 
     if 'vlans' in managed:
@@ -254,8 +281,10 @@ def config_drift(running, model):
                     findings.append(_finding('error', 'vlan_ports_missing', obj, 'VLAN %d is missing %s port(s) %s'
                                              % (vid, kind, ', '.join(missing)), True))
                 if extra:
-                    findings.append(_finding('error', 'vlan_ports_extra', obj, 'VLAN %d has extra %s port(s) %s'
-                                             % (vid, kind, ', '.join(extra)), False))
+                    findings.append(_finding('error', 'vlan_ports_extra', obj, 'VLAN %d has extra %s port(s) %s%s'
+                                             % (vid, kind, ', '.join(extra),
+                                                ' (protected VLAN)' if vid in protected else ''),
+                                             'vlan_ports' in removable and vid not in protected))
             if vlan['router_interface'] != have['router_interface']:
                 fixable = have['router_interface'] is None
                 findings.append(_finding('error', 'vlan_router_interface', obj,
@@ -470,4 +499,33 @@ def config_commands(running, model):
             if body:
                 lines.append(header)
                 lines.extend(body)
+    return lines
+
+
+def config_removals(running, model, protected_vlans=None):
+    """Return the configuration lines that remove ports from VLANs the model
+    manages but doesn't list them in, nested by indenting one space.
+
+    Only ports on VLANs in the model are removed, never VLANs themselves.
+    Protected VLANs (protected_vlans, and each cluster's session VLAN) are left
+    alone; config_drift() reports their extra ports as fixed by hand.
+    """
+    current = _parsed(running)
+    want, managed = normalize_model(model)
+    _removable, protected = _removal_settings(current, want, ['vlan_ports'], protected_vlans)
+    lines = []
+    if 'vlans' not in managed:
+        return lines
+    for vid, vlan in sorted(want['vlans'].items()):
+        have = current['vlans'].get(vid)
+        if have is None or vid in protected:
+            continue
+        body = []
+        for kind in ('tagged', 'untagged'):
+            extra = sorted(set(have[kind]) - set(vlan[kind]), key=_port_key)
+            if extra:
+                body.append(' no %s %s' % (kind, format_ports(extra)))
+        if body:
+            lines.append('vlan %d' % vid)
+            lines.extend(body)
     return lines

@@ -18,6 +18,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_model import (
     config_commands,
     config_drift,
+    config_removals,
     normalize_model,
 )
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_status import (
@@ -63,8 +64,9 @@ def fastiron_model_config(model):
     return _model_call('fastiron_model_config', normalize_model, model)[0]
 
 
-def fastiron_config_drift(config, model):
-    return _model_call('fastiron_config_drift', config_drift, _parsed(config, 'fastiron_config_drift'), model)
+def fastiron_config_drift(config, model, remove=None, protected_vlans=None):
+    return _model_call('fastiron_config_drift', config_drift, _parsed(config, 'fastiron_config_drift'), model,
+                       remove, protected_vlans)
 
 
 def fastiron_config_commands(config, model):
@@ -95,6 +97,11 @@ def fastiron_mct_health_compare(status, peer_status, name='this switch', peer_na
                               _status(peer_status, 'fastiron_mct_health_compare'), name, peer_name)
 
 
+def fastiron_config_removals(config, model, protected_vlans=None):
+    return _model_call('fastiron_config_removals', config_removals, _parsed(config, 'fastiron_config_removals'),
+                       model, protected_vlans)
+
+
 class FilterModule(object):
 
     def filters(self):
@@ -105,6 +112,7 @@ class FilterModule(object):
             'fastiron_model_config': fastiron_model_config,
             'fastiron_config_drift': fastiron_config_drift,
             'fastiron_config_commands': fastiron_config_commands,
+            'fastiron_config_removals': fastiron_config_removals,
             'fastiron_parse_cluster_status': fastiron_parse_cluster_status,
             'fastiron_mct_health': fastiron_mct_health,
             'fastiron_mct_health_compare': fastiron_mct_health_compare,
