@@ -1,0 +1,51 @@
+# Copyright: (c) 2026, Glitch Works, LLC
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+DOCUMENTATION:
+  name: fastiron_config_commands
+  author: Jonathan Chapman (@glitchwrks)
+  version_added: 0.1.0
+  short_description: Generate the FastIron commands that bring a switch closer to a model
+  description:
+    - Returns the configuration lines that add what a switch is missing from a model, such as VLANs, tagged
+      and untagged ports, router interfaces, VLAN names, VE addresses, LAGs, MCT clusters and their clients,
+      and deploying them. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
+    - Nothing is ever removed, and LAGs and clusters that exist are not changed apart from being deployed.
+      Those differences, which usually need something undeployed first, are only reported by
+      P(glitchwrks.fastiron.fastiron_config_drift#filter).
+    - The lines are nested by indenting one space, in the order they can be applied (LAGs, VLANs, VE
+      addresses, clusters), and written the way the switch shows them. Push them with
+      M(ansible.netcommon.cli_config) and O(ansible.netcommon.cli_config#module:diff_match=none), so they
+      are sent exactly as generated.
+  positional: model
+  options:
+    _input:
+      description: The running configuration, as text or parsed by
+        P(glitchwrks.fastiron.fastiron_parse_config#filter).
+      type: raw
+      required: true
+    model:
+      description: The model.
+      type: dict
+      required: true
+
+EXAMPLES: |
+  - name: Get the running configuration
+    ansible.netcommon.cli_command:
+      command: show running-config
+    register: running
+
+  - name: Add what the switch is missing
+    vars:
+      commands: "{{ running.stdout | glitchwrks.fastiron.fastiron_config_commands(model) }}"
+    ansible.netcommon.cli_config:
+      config: "{{ commands | join('\n') }}"
+      diff_match: none
+    when: commands | length > 0
+
+RETURN:
+  _value:
+    description: Configuration lines, empty when there is nothing to add.
+    type: list
+    elements: str

@@ -15,6 +15,11 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
     mct_compare,
     parse_config,
 )
+from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_model import (
+    config_commands,
+    config_drift,
+    normalize_model,
+)
 
 
 def _parsed(value, filter_name):
@@ -42,6 +47,26 @@ def fastiron_mct_compare(config, peer_config, name='this switch', peer_name='its
                        name, peer_name)
 
 
+def _model_call(filter_name, function, *args):
+    try:
+        return function(*args)
+    except FastIronConfigError as e:
+        raise AnsibleFilterError('%s: %s' % (filter_name, e))
+
+
+def fastiron_model_config(model):
+    return _model_call('fastiron_model_config', normalize_model, model)[0]
+
+
+def fastiron_config_drift(config, model):
+    return _model_call('fastiron_config_drift', config_drift, _parsed(config, 'fastiron_config_drift'), model)
+
+
+def fastiron_config_commands(config, model):
+    return _model_call('fastiron_config_commands', config_commands, _parsed(config, 'fastiron_config_commands'),
+                       model)
+
+
 class FilterModule(object):
 
     def filters(self):
@@ -49,4 +74,7 @@ class FilterModule(object):
             'fastiron_parse_config': fastiron_parse_config,
             'fastiron_mct_audit': fastiron_mct_audit,
             'fastiron_mct_compare': fastiron_mct_compare,
+            'fastiron_model_config': fastiron_model_config,
+            'fastiron_config_drift': fastiron_config_drift,
+            'fastiron_config_commands': fastiron_config_commands,
         }
