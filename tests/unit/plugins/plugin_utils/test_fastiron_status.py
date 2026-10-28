@@ -73,7 +73,6 @@ def test_healthy_cluster_matches_its_configuration(status_text):
      [('error', 'peer_down')]),
     ('Active Vlan Range:  1000 3001', 'Active Vlan Range:  1000', [('warning', 'peer_vlans_inactive')]),
     ('Deployed    1/1/2    104  Up', 'Deployed    1/1/2    104  Down', [('error', 'client_down')]),
-    ('Deployed    1/1/2    104  Up', 'Deployed    1/1/2    104  Remote Up', [('error', 'client_down')]),
     ('Deployed    1/1/2    104  Up', 'Not Deployed 1/1/2    104  Down', [('warning', 'client_not_deployed')]),
     ('Number of Clients configured: 1', 'Number of Clients configured: 2', [('warning', 'clients_unparsed')]),
 ])
@@ -118,3 +117,16 @@ def test_undeployed_parts_of_the_configuration_are_not_expected():
     config = parse_config(fixture('cs1b_running_config.txt'))
     config['clusters']['ALB-CORE']['deployed'] = False
     assert health('', config) == []
+
+
+@pytest.mark.parametrize('name, side', [
+    ('cs1a_show_cluster_client_remote_up.txt', 'only up on the peer; its link to this switch is down (Remote Up)'),
+    ('cs1b_show_cluster_client_local_up.txt', 'only up on this switch; its link to the peer is down (Local Up)'),
+])
+def test_client_up_on_one_switch_only(name, side):
+    # Captured with the client's link to cs1a unplugged.
+    status = parse_cluster_status(fixture(name))
+    assert status['clusters']['ALB-CORE']['peers'][0]['state'] == 'CCP Up'
+    [finding] = mct_health(status)
+    assert (finding['severity'], finding['rule']) == ('error', 'client_down')
+    assert finding['message'] == 'cluster ALB-CORE: client c2960g is %s' % side

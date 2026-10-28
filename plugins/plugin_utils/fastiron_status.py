@@ -37,6 +37,11 @@ PEER_REACHABLE = 'Peer Reachable'
 CLUSTER_DEPLOYED = 'Deploy'
 CLIENT_DEPLOYED = 'Deployed'
 CLIENT_UP = 'Up'
+# Client states where the client is up on only one of the two switches.
+CLIENT_HALF_UP = {
+    'Remote Up': 'only up on the peer; its link to this switch is down',
+    'Local Up': "only up on this switch; its link to the peer is down",
+}
 
 
 def _int(value):
@@ -204,6 +209,10 @@ def mct_health(status, config=None):
             if client['config'] != CLIENT_DEPLOYED:
                 findings.append(_finding('warning', 'client_not_deployed', name,
                                          'cluster %s: client %s is %s' % (name, client_name, client['config'])))
+            elif client['state'] in CLIENT_HALF_UP:
+                findings.append(_finding('error', 'client_down', name,
+                                         'cluster %s: client %s is %s (%s)'
+                                         % (name, client_name, CLIENT_HALF_UP[client['state']], client['state'])))
             elif client['state'] != CLIENT_UP:
                 findings.append(_finding('error', 'client_down', name,
                                          'cluster %s: client %s is in state %s, not %s'
