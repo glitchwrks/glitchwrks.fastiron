@@ -26,14 +26,16 @@ Full documentation for each is available with `ansible-doc`, for example
 - ansible-core 2.19 or later on the controller
 - [`ansible.netcommon`](https://galaxy.ansible.com/ui/repo/published/ansible/netcommon/) 5.0.0 or
   later, installed automatically as a dependency
-- [`ansible-pylibssh`](https://pypi.org/project/ansible-pylibssh/) on the controller, for the
-  older SSH algorithms these switches need (see below)
+- [`ansible-pylibssh`](https://pypi.org/project/ansible-pylibssh/) 1.4.0 or later, installed in
+  the Python environment Ansible runs from. It is required: the switches only offer older SSH
+  algorithms (see below), which Ansible reaches through libssh, and `ansible-galaxy` does not
+  install Python packages. It is listed in [`requirements.txt`](requirements.txt).
 
 ## Installation
 
 ```sh
 ansible-galaxy collection install glitchwrks.fastiron
-pip install ansible-pylibssh
+pip install 'ansible-pylibssh>=1.4.0'
 ```
 
 Or straight from GitHub:
@@ -41,6 +43,9 @@ Or straight from GitHub:
 ```sh
 ansible-galaxy collection install git+https://github.com/glitchwrks/glitchwrks.fastiron.git
 ```
+
+With [uv](https://docs.astral.sh/uv/), add `ansible-pylibssh` to the project that runs Ansible
+instead of using pip: `uv add 'ansible-pylibssh>=1.4.0'`.
 
 ## Connecting to the switches
 

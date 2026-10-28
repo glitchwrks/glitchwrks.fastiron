@@ -1,0 +1,3 @@
+# Python packages the collection needs on the Ansible controller.
+# network_cli reaches FastIron switches through libssh.
+ansible-pylibssh>=1.4.0
