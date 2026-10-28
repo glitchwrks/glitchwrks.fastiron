@@ -71,15 +71,11 @@ class ActionModule(ActionBase):
                 )
 
             if changed and not self._task.check_mode:
-                # Upload over the connection's existing SSH session. net_put first tries to
-                # download the destination, and ansible.netcommon's libssh connection drops
-                # its session when that fails, which closes the CLI shell along with it.
                 fd, path = tempfile.mkstemp(suffix='.sshPubKey')
                 try:
                     with os.fdopen(fd, 'w') as f:
                         f.write(to_rfc4716(wanted))
-                    conn.copy_file(source=path, destination=KEY_FILE, proto='scp',
-                                   timeout=conn.get_option('persistent_command_timeout'))
+                    self._upload(path, conn.get_option('persistent_command_timeout'))
                 finally:
                     os.remove(path)
 
@@ -94,3 +90,21 @@ class ActionModule(ActionBase):
 
         result['changed'] = changed
         return result
+
+    def _upload(self, path, timeout):
+        """Copy the key file to the switch over a separate SSH connection.
+
+        FastIron allows one channel per SSH connection, and the CLI shell of the
+        persistent connection holds it. In this process, the network_cli connection
+        has no SSH session of its own yet, so copy_file opens a new one, with the same
+        credentials and options, and it is closed afterwards. (net_put cannot be used:
+        it first tries to download the destination, and when that fails
+        ansible.netcommon's libssh connection drops its session.)
+        """
+        try:
+            self._connection.copy_file(source=path, destination=KEY_FILE, proto='scp', timeout=timeout)
+        finally:
+            ssh = self._connection.ssh_type_conn
+            # Only libssh caches the session; it has none when connecting failed.
+            if self._connection.ssh_type == 'libssh' and hasattr(ssh, 'ssh'):
+                ssh.close()
