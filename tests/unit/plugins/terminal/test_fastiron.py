@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+
+from ansible.errors import AnsibleConnectionFailure
 
 from ansible_collections.glitchwrks.fastiron.plugins.terminal.fastiron import TerminalModule
 
@@ -57,3 +61,35 @@ def test_errors_are_detected(output):
 
 def test_normal_output_is_not_an_error():
     assert not matches(TerminalModule.terminal_stderr_re, b'Write startup-config done.\r\nFlash to Flash Done.')
+
+
+def strip(terminal, data):
+    """network_cli's cleanup of each piece of a response."""
+    for regex in terminal.ansi_re:
+        data = regex.sub(b'', data)
+    return data
+
+
+ERASED = b'--More--, next page: Space, next line: Return key, quit: Control-c' + b'\x08 \x08' * 66 + b' router-interface ve 1'
+
+
+def test_user_exec_keeps_the_pager_erase_sequence():
+    connection = MagicMock()
+    connection.get_prompt.return_value = b'SSH@cs1a.example.net>'
+    connection.exec_command.side_effect = AnsibleConnectionFailure('Invalid input -> skip-page-display')
+    terminal = TerminalModule(connection)
+    terminal.on_open_shell()
+    assert strip(terminal, ERASED) == ERASED
+
+
+def test_privileged_exec_keeps_the_default_cleanup():
+    connection = MagicMock()
+    connection.get_prompt.return_value = b'SSH@cs1a.example.net>'
+    connection.exec_command.side_effect = AnsibleConnectionFailure('Invalid input -> skip-page-display')
+    terminal = TerminalModule(connection)
+    terminal.on_open_shell()
+    connection.exec_command.side_effect = None
+    connection.get_prompt.side_effect = [b'SSH@cs1a.example.net>', b'SSH@cs1a.example.net#']
+    terminal.on_become(passwd='secret')
+    assert b'\x08' not in strip(terminal, ERASED)
+    assert len(terminal.ansi_re) == len(TerminalModule._ANSI_RE)

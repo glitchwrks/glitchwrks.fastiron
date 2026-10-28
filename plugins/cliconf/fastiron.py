@@ -20,6 +20,10 @@ description:
     run C(write memory) afterwards to keep them across a reload. The plugin waits for the
     copy to flash to finish before returning, so its output does not leak into the next
     command.
+  - In user EXEC mode (without C(ansible_become)), FastIron pages long output and does not
+    allow turning paging off. The plugin answers the pager and removes it from the output,
+    so commands such as C(show running-config) return the same output as in privileged
+    EXEC mode.
   - Use with P(ansible.netcommon.network_cli#connection) by setting C(ansible_network_os) to
     C(glitchwrks.fastiron.fastiron).
 '''
@@ -57,6 +61,18 @@ _INNER_SPACE_RE = re.compile(r'(?<=\S)[ \t]+')
 _WRITE_MEMORY_RE = re.compile(r'^\s*wr\w*\s+mem\w*\s*$', re.I)
 _WRITE_DONE = 'Write startup-config done'
 _FLASH_DONE = 'Flash to Flash Done'
+
+# In user EXEC mode ("SSH@switch>") FastIron pages long output, and does not
+# accept "skip-page-display" to stop it. After each page it prints the line
+# below, without a newline, and waits for a key. Space shows the next page,
+# after erasing the line with one "backspace, space, backspace" per character.
+PAGER = '--More--, next page: Space, next line: Return key, quit: Control-c'
+_PAGER_PROMPT = re.escape(PAGER) + '$'
+_PAGER_ERASE_RE = re.compile(re.escape(PAGER) + '(?:\x08 \x08)*')
+_BACKSPACE_RE = re.compile('\x08.?', re.S)
+# Pages answered per command. Running out leaves the command waiting at the
+# pager until the command timeout.
+MAX_PAGES = 1000
 
 
 def normalize_spacing(text):
@@ -99,6 +115,8 @@ def to_commands(items):
 class Cliconf(CliconfBase):
 
     def send_command(self, command=None, prompt=None, answer=None, sendonly=False, **kwargs):
+        if prompt is None and not sendonly and self._in_user_exec():
+            return self._send_paged(command, **kwargs)
         if prompt is not None or sendonly or not _WRITE_MEMORY_RE.match(to_text(command or '')):
             return super().send_command(command=command, prompt=prompt, answer=answer, sendonly=sendonly, **kwargs)
 
@@ -109,6 +127,24 @@ class Cliconf(CliconfBase):
             flash = self._connection.receive(prompts=[to_bytes(_FLASH_DONE)], answer=[b''])
             response += '\n' + to_text(flash, errors='surrogate_then_replace')
         return response
+
+    def _in_user_exec(self):
+        prompt = self._connection.get_prompt()
+        return prompt is not None and to_text(prompt, errors='surrogate_then_replace').rstrip().endswith('>')
+
+    def _send_paged(self, command, **kwargs):
+        """Run a command in user EXEC mode, answering the pager with Space.
+
+        The terminal plugin leaves backspaces in user EXEC responses, so each
+        pager line and its erase sequence can be removed exactly here, keeping
+        the indentation of the line that follows it.
+        """
+        kwargs.pop('newline', None)
+        kwargs.pop('check_all', None)
+        response = super().send_command(
+            command=command, prompt=[_PAGER_PROMPT] * MAX_PAGES, answer=[' '] * MAX_PAGES,
+            newline=False, check_all=True, **kwargs)
+        return _BACKSPACE_RE.sub('', _PAGER_ERASE_RE.sub('', response))
 
     def get_device_info(self):
         device_info = {'network_os': 'fastiron'}

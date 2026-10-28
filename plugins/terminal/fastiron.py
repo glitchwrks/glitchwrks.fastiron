@@ -13,6 +13,8 @@ version_added: 0.1.0
 description:
   - Recognizes FastIron prompts and error messages, turns off paging, and enters
     privileged EXEC mode with the enable password.
+  - In user EXEC mode, where FastIron does not allow turning off paging, it keeps the pager's
+    erase sequence intact so the cliconf plugin can page through long output.
   - Use with P(ansible.netcommon.network_cli#connection) by setting C(ansible_network_os) to
     C(glitchwrks.fastiron.fastiron).
 '''
@@ -46,11 +48,30 @@ class TerminalModule(TerminalBase):
         re.compile(br"Permission denied", re.I),
     ]
 
+    # netcommon's default also removes each backspace with the character after it.
+    # In user EXEC mode that would mangle the pager's erase sequence, which is
+    # split arbitrarily between reads, and leave spaces that look like
+    # indentation; the cliconf plugin removes it, and other backspaces, from the
+    # finished response instead. Privileged EXEC mode turns paging off and keeps
+    # the default.
+    _ANSI_RE = TerminalBase.ansi_re
+    _USER_EXEC_ANSI_RE = [regex for regex in TerminalBase.ansi_re if not regex.pattern.startswith(rb'\x08')]
+
+    # network_cli doesn't know the prompt while it reads a response, so the mode
+    # is set when the shell opens and when enable succeeds.
+    _user_exec = False
+
+    @property
+    def ansi_re(self):
+        return self._USER_EXEC_ANSI_RE if self._user_exec else self._ANSI_RE
+
     def on_open_shell(self):
-        if self._get_prompt().endswith(b'#'):
+        self._user_exec = not self._get_prompt().rstrip().endswith(b'#')
+        if not self._user_exec:
             self._disable_paging()
         else:
-            # User EXEC may not allow this; on_become disables paging again after
+            # FastIron 08.0.30 rejects this in user EXEC mode, where the cliconf
+            # plugin pages through output instead; on_become turns paging off after
             # entering privileged EXEC mode, where it is always available.
             try:
                 self._exec_cli_command(b'skip-page-display')
@@ -65,6 +86,7 @@ class TerminalModule(TerminalBase):
 
     def on_become(self, passwd=None):
         if self._get_prompt().endswith(b'#'):
+            self._user_exec = False
             return
 
         cmd = {
@@ -84,6 +106,7 @@ class TerminalModule(TerminalBase):
             raise AnsibleConnectionFailure(
                 'unable to enter privileged EXEC mode, still at prompt [%s]; check ansible_become_password'
                 % to_text(prompt))
+        self._user_exec = False
         self._disable_paging()
 
     def on_unbecome(self):
