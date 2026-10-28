@@ -12,6 +12,7 @@ import pytest
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_config import parse_config
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_status import (
     mct_health,
+    mct_health_compare,
     parse_cluster_status,
 )
 
@@ -50,7 +51,7 @@ def test_parses_show_cluster(status_text):
     assert cluster['peers'] == [{
         'address': '10.0.1.2', 'rbridge_id': 2, 'icl': 'ALB-CORE-MCT', 'keep_alive_interval': 10,
         'hold_time': 90, 'fast_failover': True, 'active_vlans': '1000 3001',
-        'last_ccp_down_reason': 'Not Down', 'state': 'CCP Up',
+        'last_ccp_down_reason': 'Not Down', 'ccp_down_reason': None, 'state': 'CCP Up',
         'state_detail': 'Up Time: 0 days:20 hr:12 min:53 sec'}]
     assert cluster['clients_configured'] == 1
     assert cluster['clients'] == {
@@ -81,11 +82,17 @@ def test_problems_are_found(status_text, old, new, expected):
     assert rules(health(status_text.replace(old, new))) == expected
 
 
-def test_peer_down_names_the_reason(status_text):
+def test_peer_down_names_the_last_reason(status_text):
     text = status_text.replace('Not Down', 'Keep-Alive Timeout').replace(
         'CCP Up (Up Time:   0 days:20 hr:12 min:53 sec)', 'CCP Down')
     [finding] = health(text)
-    assert 'CCP Down' in finding['message'] and 'Keep-Alive Timeout' in finding['message']
+    assert finding['message'] == 'cluster ALB-CORE: peer 10.0.1.2 is in state CCP Down; reason: Keep-Alive Timeout'
+
+
+def test_peer_down_without_a_reason_yet(status_text):
+    # For a few seconds after the session goes down, the last reason still reads Not Down.
+    [finding] = health(status_text.replace('CCP Up (Up Time:   0 days:20 hr:12 min:53 sec)', 'CCP Down'))
+    assert finding['message'] == 'cluster ALB-CORE: peer 10.0.1.2 is in state CCP Down'
 
 
 def test_missing_peer(status_text):
@@ -130,3 +137,35 @@ def test_client_up_on_one_switch_only(name, side):
     [finding] = mct_health(status)
     assert (finding['severity'], finding['rule']) == ('error', 'client_down')
     assert finding['message'] == 'cluster ALB-CORE: client c2960g is %s' % side
+
+
+@pytest.mark.parametrize('name, peer', [('cs1a_show_cluster_icl_down.txt', '10.0.1.3'),
+                                        ('cs1b_show_cluster_icl_down.txt', '10.0.1.2')])
+def test_icl_down(name, peer):
+    # Captured with both ICL links unplugged; this lab runs keep-alive over the ICL.
+    status = parse_cluster_status(fixture(name))
+    assert status['clusters']['ALB-CORE']['peers'][0]['ccp_down_reason'] == 'ICL interface down'
+    assert [(f['rule'], f['message']) for f in mct_health(status)] == [
+        ('keep_alive_unreachable',
+         'cluster ALB-CORE: peer not reachable over keep-alive VLAN 3001 (Peer Unreachable)'),
+        ('peer_down', 'cluster ALB-CORE: peer %s is in state CCP Down; reason: ICL interface down' % peer),
+        ('client_down', 'cluster ALB-CORE: client c2960g is Master on this switch: with the CCP session down, '
+                        'this switch serves it on its own'),
+    ]
+
+
+def test_split_brain_when_both_switches_are_master():
+    a = parse_cluster_status(fixture('cs1a_show_cluster_icl_down.txt'))
+    b = parse_cluster_status(fixture('cs1b_show_cluster_icl_down.txt'))
+    assert mct_health_compare(a, b, 'cs1a', 'cs1b') == [{
+        'severity': 'error', 'rule': 'split_brain', 'cluster': 'ALB-CORE',
+        'message': 'cluster ALB-CORE: client c2960g is Master on both cs1a and cs1b (split-brain): '
+                   'both switches serve it on their own'}]
+
+
+@pytest.mark.parametrize('a, b', [
+    ('cs1b_show_cluster.txt', 'cs1b_show_cluster.txt'),
+    ('cs1a_show_cluster_client_remote_up.txt', 'cs1b_show_cluster_client_local_up.txt'),
+])
+def test_no_split_brain(a, b):
+    assert mct_health_compare(parse_cluster_status(fixture(a)), parse_cluster_status(fixture(b))) == []

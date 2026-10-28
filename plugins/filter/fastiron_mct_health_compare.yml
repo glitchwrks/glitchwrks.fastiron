@@ -1,0 +1,57 @@
+# Copyright: (c) 2026, Glitch Works, LLC
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+DOCUMENTATION:
+  name: fastiron_mct_health_compare
+  author: Jonathan Chapman (@glitchwrks)
+  version_added: 0.1.0
+  short_description: Check the live state of two FastIron MCT peers together
+  description:
+    - Compares the output of C(show cluster) from both peers of an MCT cluster, for problems that only
+      show up on both switches together.
+    - Reports split-brain, where both switches show a client as C(Master), each serving it on its own.
+      This happens when the peers can reach each other over neither the ICL nor the keep-alive VLAN.
+    - Use P(glitchwrks.fastiron.fastiron_mct_health#filter) for each switch's own state.
+  positional: peer_status, name, peer_name
+  options:
+    _input:
+      description: The output of C(show cluster) on one switch, or its status parsed by
+        P(glitchwrks.fastiron.fastiron_parse_cluster_status#filter).
+      type: raw
+      required: true
+    peer_status:
+      description: The same, from its MCT peer.
+      type: raw
+      required: true
+    name:
+      description: The name of the first switch, used in messages.
+      type: string
+      default: this switch
+    peer_name:
+      description: The name of the peer, used in messages.
+      type: string
+      default: its peer
+
+EXAMPLES: |
+  - name: Get the live state of the MCT clusters
+    ansible.netcommon.cli_command:
+      command: show cluster
+    register: cluster
+
+  - name: Fail on split-brain
+    vars:
+      findings: >-
+        {{ cluster.stdout | glitchwrks.fastiron.fastiron_mct_health_compare(
+             hostvars[mct_peer].cluster.stdout, name=inventory_hostname, peer_name=mct_peer) }}
+    ansible.builtin.assert:
+      that: findings | length == 0
+      fail_msg: "{{ findings | map(attribute='message') }}"
+
+RETURN:
+  _value:
+    description:
+      - A list of findings, empty when nothing was found.
+      - Each finding has C(severity) (C(error) or C(warning)), C(rule), C(cluster) and C(message).
+    type: list
+    elements: dict

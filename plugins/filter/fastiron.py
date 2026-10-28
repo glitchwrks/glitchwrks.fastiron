@@ -22,6 +22,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_model
 )
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_status import (
     mct_health,
+    mct_health_compare,
     parse_cluster_status,
 )
 
@@ -89,6 +90,11 @@ def fastiron_mct_health(status, config=None):
                       None if config is None else _parsed(config, 'fastiron_mct_health'))
 
 
+def fastiron_mct_health_compare(status, peer_status, name='this switch', peer_name='its peer'):
+    return mct_health_compare(_status(status, 'fastiron_mct_health_compare'),
+                              _status(peer_status, 'fastiron_mct_health_compare'), name, peer_name)
+
+
 class FilterModule(object):
 
     def filters(self):
@@ -101,4 +107,5 @@ class FilterModule(object):
             'fastiron_config_commands': fastiron_config_commands,
             'fastiron_parse_cluster_status': fastiron_parse_cluster_status,
             'fastiron_mct_health': fastiron_mct_health,
+            'fastiron_mct_health_compare': fastiron_mct_health_compare,
         }

@@ -22,6 +22,7 @@ CLI are likely to work, but have not been tested.
 | `glitchwrks.fastiron.fastiron_config_commands` | filter | Generates the commands that add what a switch is missing from a model |
 | `glitchwrks.fastiron.fastiron_parse_cluster_status` | filter | Parses the live state of MCT clusters from `show cluster` |
 | `glitchwrks.fastiron.fastiron_mct_health` | filter | Checks `show cluster` for MCT clusters, peers and clients that aren't working |
+| `glitchwrks.fastiron.fastiron_mct_health_compare` | filter | Checks both MCT peers' `show cluster` together, for split-brain |
 
 Full documentation for each is available with `ansible-doc`, for example
 `ansible-doc -t filter glitchwrks.fastiron.fastiron_mct_audit`.
@@ -201,6 +202,8 @@ that each cluster is deployed, the peer is reachable over the keep-alive VLAN, t
 protocol (CCP) session with the peer is up with every member VLAN active, and each client is up.
 Given the running configuration, it also reports deployed clusters and clients that `show cluster`
 doesn't show.
+`fastiron_mct_health_compare` checks both peers' `show cluster` together, and reports split-brain:
+both switches showing a client as `Master`, each serving it on its own.
 
 ```yaml
 - name: Get the live state of the MCT clusters

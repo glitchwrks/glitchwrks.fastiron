@@ -25,7 +25,9 @@ _PEER_ICL_RE = re.compile(r'ICL:\s*(\S+)')
 _INTERVAL_RE = re.compile(r'KeepAlive Interval:\s*(\d+)')
 _HOLD_TIME_RE = re.compile(r'Hold Time:\s*(\d+)')
 _ACTIVE_VLANS_RE = re.compile(r'^Active Vlan Range:\s*(.*?)\s*$')
-_CCP_DOWN_REASON_RE = re.compile(r'^Last Reason for CCP Down:\s*(.*?)\s*$')
+_LAST_CCP_DOWN_REASON_RE = re.compile(r'^Last Reason for CCP Down:\s*(.*?)\s*$')
+# Only shown while the CCP session is down.
+_CCP_DOWN_REASON_RE = re.compile(r'^Reason for CCP Down:\s*(.*?)\s*$')
 _PEER_STATE_RE = re.compile(r'^Peer State:\s*([^(]*?)\s*(?:\((.*)\))?\s*$')
 _CLIENT_COUNT_RE = re.compile(r'^Number of Clients configured:\s*(\d+)')
 _ICL_ROW_RE = re.compile(r'^(\S+)\s+(\d+(?:/\d+)+)(?:\s+(\d+))?\s*$')
@@ -42,6 +44,12 @@ CLIENT_HALF_UP = {
     'Remote Up': 'only up on the peer; its link to this switch is down',
     'Local Up': "only up on this switch; its link to the peer is down",
 }
+# With the CCP session down, a switch serving a client on its own shows it as
+# Master. Both switches doing so, with keep-alive down too, is split-brain.
+CLIENT_MASTER = 'Master'
+# What "Last Reason for CCP Down" shows before the session has gone down, and
+# for a few seconds after it does.
+CCP_NOT_DOWN = 'Not Down'
 
 
 def _int(value):
@@ -110,7 +118,7 @@ def parse_cluster_status(text):
                     'address': m.group(1), 'rbridge_id': _int(rbridge and rbridge.group(1)),
                     'icl': icl and icl.group(1), 'keep_alive_interval': None, 'hold_time': None,
                     'fast_failover': False, 'active_vlans': None, 'last_ccp_down_reason': None,
-                    'state': None, 'state_detail': None})
+                    'ccp_down_reason': None, 'state': None, 'state_detail': None})
                 continue
             if not cluster['peers']:
                 continue
@@ -121,7 +129,8 @@ def parse_cluster_status(text):
                 peer['hold_time'] = _int(hold and hold.group(1))
                 peer['fast_failover'] = 'Fast Failover' in line
             for regex, key, convert in ((_ACTIVE_VLANS_RE, 'active_vlans', _vlans),
-                                        (_CCP_DOWN_REASON_RE, 'last_ccp_down_reason', str)):
+                                        (_LAST_CCP_DOWN_REASON_RE, 'last_ccp_down_reason', str),
+                                        (_CCP_DOWN_REASON_RE, 'ccp_down_reason', str)):
                 m = regex.match(line)
                 if m:
                     peer[key] = convert(m.group(1))
@@ -193,9 +202,11 @@ def mct_health(status, config=None):
             findings.append(_finding('error', 'peer_missing', name, 'cluster %s shows no peer' % name))
         for peer in cluster['peers']:
             if not (peer['state'] or '').startswith('CCP Up'):
+                reason = peer['ccp_down_reason'] or peer['last_ccp_down_reason']
                 findings.append(_finding('error', 'peer_down', name,
-                                         'cluster %s: peer %s is in state %s; last reason for CCP down: %s'
-                                         % (name, peer['address'], peer['state'], peer['last_ccp_down_reason'])))
+                                         'cluster %s: peer %s is in state %s%s'
+                                         % (name, peer['address'], peer['state'],
+                                            '; reason: %s' % reason if reason and reason != CCP_NOT_DOWN else '')))
             elif peer['active_vlans'] != cluster['member_vlans']:
                 findings.append(_finding('warning', 'peer_vlans_inactive', name,
                                          'cluster %s: active VLANs with peer %s (%s) differ from the member VLANs (%s)'
@@ -209,6 +220,10 @@ def mct_health(status, config=None):
             if client['config'] != CLIENT_DEPLOYED:
                 findings.append(_finding('warning', 'client_not_deployed', name,
                                          'cluster %s: client %s is %s' % (name, client_name, client['config'])))
+            elif client['state'] == CLIENT_MASTER:
+                findings.append(_finding('error', 'client_down', name,
+                                         'cluster %s: client %s is Master on this switch: with the CCP session down, '
+                                         'this switch serves it on its own' % (name, client_name)))
             elif client['state'] in CLIENT_HALF_UP:
                 findings.append(_finding('error', 'client_down', name,
                                          'cluster %s: client %s is %s (%s)'
@@ -217,4 +232,17 @@ def mct_health(status, config=None):
                 findings.append(_finding('error', 'client_down', name,
                                          'cluster %s: client %s is in state %s, not %s'
                                          % (name, client_name, client['state'], CLIENT_UP)))
+    return findings
+
+
+def mct_health_compare(a, b, a_name='a', b_name='b'):
+    """Check two MCT peers' parsed "show cluster" output together. Returns a list of findings."""
+    findings = []
+    for name in sorted(set(a['clusters']) & set(b['clusters'])):
+        clients_a, clients_b = a['clusters'][name]['clients'], b['clusters'][name]['clients']
+        for client_name in sorted(set(clients_a) & set(clients_b)):
+            if clients_a[client_name]['state'] == clients_b[client_name]['state'] == CLIENT_MASTER:
+                findings.append(_finding('error', 'split_brain', name,
+                                         'cluster %s: client %s is Master on both %s and %s (split-brain): both '
+                                         'switches serve it on their own' % (name, client_name, a_name, b_name)))
     return findings
