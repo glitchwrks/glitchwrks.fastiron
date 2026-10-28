@@ -105,7 +105,9 @@ class ActionModule(ActionBase):
             ssh._connect()
             channel = ssh.ssh.new_channel()
             try:
-                scp_send(channel, KEY_FILE, data, timeout)
+                if not scp_send(channel, KEY_FILE, data, timeout):
+                    # The caller checks the key list the switch shows afterwards.
+                    self._display.vvv('the switch disconnected after receiving the key file')
             finally:
                 channel.close()
         finally:

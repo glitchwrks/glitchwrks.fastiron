@@ -104,8 +104,12 @@ def to_rfc4716(bodies):
     return '\n'.join(lines) + '\n'
 
 
-def _scp_ack(channel, timeout):
-    """Wait for the SCP server to accept the last step, or raise with its message."""
+class _ScpDisconnected(Exception):
+    pass
+
+
+def _scp_ack(channel, timeout, step):
+    """Wait for the SCP server to accept a step, or raise with its message."""
     deadline = time.monotonic() + timeout
     reply = b''
     while True:
@@ -113,19 +117,21 @@ def _scp_ack(channel, timeout):
             return
         if reply[:1] in (b'\x01', b'\x02') and b'\n' in reply:
             message = reply[1:].split(b'\n', 1)[0].decode('utf-8', 'replace').strip()
-            raise FastIronKeyError('the switch refused the key file: %s' % message)
+            raise FastIronKeyError('the switch refused the key file %s: %s' % (step, message))
         if reply and reply[:1] not in (b'\x01', b'\x02'):
-            raise FastIronKeyError('unexpected reply from the switch\'s SCP server: %r' % reply[:80])
+            raise FastIronKeyError('unexpected reply from the switch\'s SCP server %s: %r' % (step, reply[:80]))
         if time.monotonic() > deadline:
-            raise FastIronKeyError('timed out waiting for the switch\'s SCP server')
-        ready = channel.poll(timeout=100)
-        if ready < 0 or (ready == 0 and channel.is_eof):
-            raise FastIronKeyError('the switch closed the SCP connection')
-        if ready:
-            chunk = channel.recv(1024)
-            if chunk is None:
-                raise FastIronKeyError('the switch closed the SCP connection')
-            reply += chunk
+            raise FastIronKeyError('timed out waiting for the switch\'s SCP server %s' % step)
+        # pylibssh raises its own exceptions when the connection drops.
+        try:
+            ready = channel.poll(timeout=100)
+            closed = ready < 0 or (ready == 0 and channel.is_eof)
+            chunk = channel.recv(1024) if ready > 0 else b''
+        except Exception as e:
+            raise _ScpDisconnected(str(e))
+        if closed or chunk is None:
+            raise _ScpDisconnected('the switch closed the SCP connection')
+        reply += chunk
 
 
 def scp_send(channel, name, data, timeout=30):
@@ -134,12 +140,26 @@ def scp_send(channel, name, data, timeout=30):
     libssh shell-quotes the target of "scp -t", which FastIron does not unquote: it
     accepts the request, then refuses the file with "Wrong file name is specified".
     Send the request the way OpenSSH's scp does, unquoted.
+
+    FastIron may drop the connection once it has the file, instead of acknowledging
+    it. Return True when the switch acknowledged the file, and False when it
+    disconnected after receiving it; the caller then has to check that the switch
+    took it.
     """
+    steps = (
+        ('starting the upload', None),
+        ('before receiving it', b'C0644 %d %s\n' % (len(data), name.encode('ascii'))),
+        ('after receiving it', data + b'\0'),
+    )
     channel.request_exec('scp -t %s' % name)
-    _scp_ack(channel, timeout)
-    channel.write(b'C0644 %d %s\n' % (len(data), name.encode('ascii')))
-    _scp_ack(channel, timeout)
-    channel.write(data)
-    channel.write(b'\0')
-    _scp_ack(channel, timeout)
+    for index, (step, payload) in enumerate(steps):
+        if payload is not None:
+            channel.write(payload)
+        try:
+            _scp_ack(channel, timeout, step)
+        except _ScpDisconnected as e:
+            if index == len(steps) - 1:
+                return False
+            raise FastIronKeyError('the switch closed the SCP connection %s: %s' % (step, e))
     channel.send_eof()
+    return True
