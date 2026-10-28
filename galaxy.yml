@@ -17,7 +17,7 @@ tags:
   - fastiron
   - icx
 dependencies:
-  ansible.netcommon: ">=5.0.0"
+  ansible.netcommon: ">=8.6.0"
 repository: https://github.com/glitchwrks/glitchwrks.fastiron
 documentation: https://github.com/glitchwrks/glitchwrks.fastiron
 homepage: https://github.com/glitchwrks/glitchwrks.fastiron

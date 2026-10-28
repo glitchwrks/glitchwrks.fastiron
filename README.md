@@ -24,8 +24,9 @@ Full documentation for each is available with `ansible-doc`, for example
 ## Requirements
 
 - ansible-core 2.19 or later on the controller
-- [`ansible.netcommon`](https://galaxy.ansible.com/ui/repo/published/ansible/netcommon/) 5.0.0 or
-  later, installed automatically as a dependency
+- [`ansible.netcommon`](https://galaxy.ansible.com/ui/repo/published/ansible/netcommon/) 8.6.0 or
+  later, installed automatically as a dependency. Older releases, such as the one included in the
+  `ansible` 13 package, use a feature that ansible-core 2.23 removes
 - [`ansible-pylibssh`](https://pypi.org/project/ansible-pylibssh/) 1.4.0 or later, installed in
   the Python environment Ansible runs from. It is required: the switches only offer older SSH
   algorithms (see below), which Ansible reaches through libssh, and `ansible-galaxy` does not
