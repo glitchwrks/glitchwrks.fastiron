@@ -49,13 +49,14 @@ instead of using pip: `uv add 'ansible-pylibssh>=1.4.0'`.
 
 ## Connecting to the switches
 
-FastIron 08.0.30 only offers SSH algorithms that current SSH clients turn off by default:
-the `diffie-hellman-group1-sha1` key exchange, `ssh-rsa` host keys and the `aes256-cbc` cipher.
+FastIron 08.0.30 only offers SSH algorithms that libssh turns off by default:
+the `diffie-hellman-group1-sha1` key exchange, `ssh-rsa` host keys, the `aes256-cbc` cipher and the
+`hmac-sha1` MAC.
 `ansible.netcommon.network_cli` can use them through libssh, but needs some of them set in two
 different places.
 
-The key exchange and host key algorithms are set as inventory variables. The cipher has no
-`network_cli` option, but libssh reads the controller user's `~/.ssh/config`, so add a `Host`
+The key exchange and host key algorithms are set as inventory variables. The cipher and MAC have
+no `network_cli` option, but libssh reads the controller user's `~/.ssh/config`, so add a `Host`
 block for the switches there:
 
 ```
@@ -64,6 +65,7 @@ Host cs1a.example.net cs1b.example.net
     KexAlgorithms +diffie-hellman-group1-sha1
     HostKeyAlgorithms +ssh-rsa
     Ciphers +aes256-cbc
+    MACs +hmac-sha1
 ```
 
 These algorithms are weak. Only reach the switches' management interfaces over a trusted
