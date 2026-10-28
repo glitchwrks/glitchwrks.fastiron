@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ansible_collections.glitchwrks.fastiron.plugins.cliconf.fastiron import Cliconf
+from ansible_collections.glitchwrks.fastiron.plugins.cliconf.fastiron import MAX_PAGES, PAGER, Cliconf
 
 FIXTURES = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures')
 
@@ -23,7 +23,9 @@ def fixture(name):
 
 @pytest.fixture
 def cliconf():
-    return Cliconf(MagicMock())
+    connection = MagicMock()
+    connection.get_prompt.return_value = b'SSH@cs1a.example.net#'
+    return Cliconf(connection)
 
 
 @pytest.fixture
@@ -189,3 +191,43 @@ def test_other_commands_are_sent_unchanged(cliconf, kwargs):
     assert cliconf.get(**kwargs) == 'output'
     assert 'prompt' not in kwargs or cliconf._connection.send.call_args.kwargs['prompt'] == b'something'
     cliconf._connection.receive.assert_not_called()
+
+
+def paged(text, page_lines=23):
+    """Output as the switch sends it in user EXEC mode, after network_cli's
+    cleanup: after each page the pager, then its erase sequence, and the next
+    line straight after it."""
+    lines = text.split('\n')
+    out = []
+    for start in range(0, len(lines), page_lines):
+        chunk = '\n'.join(lines[start:start + page_lines])
+        out.append(chunk if start == 0 else PAGER + '\x08 \x08' * len(PAGER) + chunk)
+    return '\n'.join(out)
+
+
+def test_user_exec_output_is_paged_through_and_unchanged(cliconf, running):
+    cliconf._connection.get_prompt.return_value = b'SSH@cs1a.example.net>'
+    cliconf._connection.send.return_value = paged(running)
+    assert running.count('\n') > 23 * 2
+    assert cliconf.get('show running-config') == running
+    kwargs = cliconf._connection.send.call_args.kwargs
+    assert kwargs['prompt'] == [kwargs['prompt'][0]] * MAX_PAGES
+    assert kwargs['answer'] == [b' '] * MAX_PAGES
+    assert kwargs['newline'] is False
+    assert kwargs['check_all'] is True
+
+
+def test_pager_prompt_only_matches_at_the_end(cliconf):
+    cliconf._connection.get_prompt.return_value = b'SSH@cs1a.example.net>'
+    cliconf._connection.send.return_value = ''
+    cliconf.get('show running-config')
+    import re
+    pattern = re.compile(cliconf._connection.send.call_args.kwargs['prompt'][0])
+    assert pattern.search(b'vlan 1 name DEFAULT-VLAN by port\r\n' + PAGER.encode())
+    assert not pattern.search(PAGER.encode() + b'\x08 \x08' * len(PAGER) + b' router-interface ve 1')
+
+
+def test_privileged_output_is_not_paged(cliconf):
+    cliconf._connection.send.return_value = 'output'
+    assert cliconf.get('show running-config') == 'output'
+    assert cliconf._connection.send.call_args.kwargs.get('prompt') is None

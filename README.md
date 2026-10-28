@@ -93,6 +93,12 @@ Sessions log in to user EXEC mode (`>`). With `ansible_become`, the terminal plu
 and answers the password prompt. When no enable password is set on the switch, `enable` succeeds
 without one.
 
+Without `ansible_become`, commands run in user EXEC mode, where FastIron pages long output and does
+not allow turning paging off. The cliconf plugin answers the pager and removes it from the output,
+so `show running-config` returns the same output as in privileged EXEC mode. That is enough for
+read-only uses such as configuration snapshots; changing the configuration needs privileged EXEC
+mode.
+
 ### Logging in with SSH keys
 
 FastIron handles SSH keys differently from OpenSSH:
