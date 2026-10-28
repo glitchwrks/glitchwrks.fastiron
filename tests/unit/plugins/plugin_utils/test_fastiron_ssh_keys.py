@@ -102,7 +102,7 @@ class ScriptedChannel:
 
     def write(self, data):
         self.written += data
-        if data == b'\0' or data.endswith(b'\n'):
+        if data.endswith((b'\0', b'\n')):
             self._next()
         return len(data)
 
@@ -126,7 +126,7 @@ class ScriptedChannel:
 
 def test_scp_send_speaks_the_protocol_unquoted():
     channel = ScriptedChannel([b'\0', b'\0', b'\0'])
-    scp_send(channel, 'sshPubKey', b'keys\n')
+    assert scp_send(channel, 'sshPubKey', b'keys\n') is True
     # libssh would send "scp -t 'sshPubKey'", which FastIron refuses.
     assert channel.command == 'scp -t sshPubKey'
     assert channel.written == b'C0644 5 sshPubKey\nkeys\n\0'
@@ -134,11 +134,32 @@ def test_scp_send_speaks_the_protocol_unquoted():
 
 
 @pytest.mark.parametrize('replies, message', [
-    ([b'\0', b'\x01Wrong file name is specified\n'], 'refused the key file: Wrong file name is specified'),
-    ([b'\x02fatal\n'], 'refused the key file: fatal'),
+    ([b'\0', b'\x01Wrong file name is specified\n'],
+     'refused the key file before receiving it: Wrong file name is specified'),
+    ([b'\x02fatal\n'], 'refused the key file starting the upload: fatal'),
     ([b'\0', b'garbage'], 'unexpected reply'),
-    ([b'\0'], 'closed the SCP connection'),
+    ([], 'closed the SCP connection starting the upload'),
+    ([b'\0'], 'closed the SCP connection before receiving it'),
 ])
 def test_scp_send_reports_what_the_switch_says(replies, message):
     with pytest.raises(FastIronKeyError, match=message):
         scp_send(ScriptedChannel(replies), 'sshPubKey', b'keys\n', timeout=1)
+
+
+def test_scp_send_accepts_a_disconnect_once_the_file_is_sent():
+    # FastIron may drop the connection instead of acknowledging the file; the caller
+    # then checks the key list.
+    channel = ScriptedChannel([b'\0', b'\0'])
+    assert scp_send(channel, 'sshPubKey', b'keys\n') is False
+    assert channel.written.endswith(b'keys\n\0')
+
+
+def test_scp_send_reports_a_dropped_connection_before_the_file():
+    class Dropped(ScriptedChannel):
+        def poll(self, timeout=-1):
+            if self.command and self.written:
+                raise RuntimeError('Socket error: disconnected')
+            return super().poll(timeout)
+
+    with pytest.raises(FastIronKeyError, match='before receiving it: Socket error: disconnected'):
+        scp_send(Dropped([b'\0']), 'sshPubKey', b'keys\n', timeout=1)
