@@ -46,3 +46,20 @@ def test_model_config_returns_the_parsed_shape():
 def test_invalid_models_are_filter_errors(name, args):
     with pytest.raises(AnsibleFilterError, match='^%s: ' % name):
         FILTERS[name](*args)
+
+
+def test_mct_health_takes_text_or_parsed_status():
+    filters = FilterModule().filters()
+    with open(os.path.join(FIXTURES, 'cs1b_show_cluster.txt')) as f:
+        status = f.read()
+    with open(os.path.join(FIXTURES, 'cs1b_running_config.txt')) as f:
+        config = f.read()
+    parsed = filters['fastiron_parse_cluster_status'](status)
+    assert filters['fastiron_mct_health'](status) == []
+    assert filters['fastiron_mct_health'](parsed, config) == []
+    assert filters['fastiron_mct_health'](status, filters['fastiron_parse_config'](config)) == []
+
+
+def test_mct_health_rejects_other_input():
+    with pytest.raises(AnsibleFilterError, match='fastiron_mct_health'):
+        FilterModule().filters()['fastiron_mct_health'](42)

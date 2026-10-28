@@ -20,6 +20,10 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_model
     config_drift,
     normalize_model,
 )
+from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_status import (
+    mct_health,
+    parse_cluster_status,
+)
 
 
 def _parsed(value, filter_name):
@@ -67,6 +71,24 @@ def fastiron_config_commands(config, model):
                        model)
 
 
+def _status(value, filter_name):
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        return parse_cluster_status(value)
+    raise AnsibleFilterError('%s: expected "show cluster" output or parsed cluster status, got %s'
+                             % (filter_name, type(value).__name__))
+
+
+def fastiron_parse_cluster_status(text):
+    return _status(text, 'fastiron_parse_cluster_status')
+
+
+def fastiron_mct_health(status, config=None):
+    return mct_health(_status(status, 'fastiron_mct_health'),
+                      None if config is None else _parsed(config, 'fastiron_mct_health'))
+
+
 class FilterModule(object):
 
     def filters(self):
@@ -77,4 +99,6 @@ class FilterModule(object):
             'fastiron_model_config': fastiron_model_config,
             'fastiron_config_drift': fastiron_config_drift,
             'fastiron_config_commands': fastiron_config_commands,
+            'fastiron_parse_cluster_status': fastiron_parse_cluster_status,
+            'fastiron_mct_health': fastiron_mct_health,
         }

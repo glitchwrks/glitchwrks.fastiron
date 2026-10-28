@@ -20,6 +20,8 @@ CLI are likely to work, but have not been tested.
 | `glitchwrks.fastiron.fastiron_model_config` | filter | Validates a model of a switch's VLANs, LAGs, VE addresses and MCT clusters |
 | `glitchwrks.fastiron.fastiron_config_drift` | filter | Reports how a running configuration differs from a model |
 | `glitchwrks.fastiron.fastiron_config_commands` | filter | Generates the commands that add what a switch is missing from a model |
+| `glitchwrks.fastiron.fastiron_parse_cluster_status` | filter | Parses the live state of MCT clusters from `show cluster` |
+| `glitchwrks.fastiron.fastiron_mct_health` | filter | Checks `show cluster` for MCT clusters, peers and clients that aren't working |
 
 Full documentation for each is available with `ansible-doc`, for example
 `ansible-doc -t filter glitchwrks.fastiron.fastiron_mct_audit`.
@@ -191,6 +193,31 @@ not saved to flash until `write memory`.
     that: findings | length == 0
     fail_msg: "{{ findings | map(attribute='message') }}"
 ```
+
+### Checking the live state of MCT clusters
+
+The checks above look at configuration. `fastiron_mct_health` checks what `show cluster` reports:
+that each cluster is deployed, the peer is reachable over the keep-alive VLAN, the cluster control
+protocol (CCP) session with the peer is up with every member VLAN active, and each client is up.
+Given the running configuration, it also reports deployed clusters and clients that `show cluster`
+doesn't show.
+
+```yaml
+- name: Get the live state of the MCT clusters
+  ansible.netcommon.cli_command:
+    command: show cluster
+  register: cluster
+
+- name: Fail when an MCT cluster isn't working
+  vars:
+    findings: "{{ cluster.stdout | glitchwrks.fastiron.fastiron_mct_health(running.stdout) }}"
+  ansible.builtin.assert:
+    that: findings | selectattr('severity', '==', 'error') | list | length == 0
+    fail_msg: "{{ findings | map(attribute='message') }}"
+```
+
+The parser was written against a healthy cluster's output. Fields it can't find are reported as
+warnings rather than passed silently.
 
 ### Managing VLANs, LAGs and MCT from a model
 

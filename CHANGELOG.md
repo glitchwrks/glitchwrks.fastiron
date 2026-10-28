@@ -32,7 +32,9 @@ Initial release\. Ansible support for Brocade / Ruckus FastIron switches over <c
 * glitchwrks\.fastiron\.fastiron\_config\_drift \- Compare a FastIron running configuration with a model\.
 * glitchwrks\.fastiron\.fastiron\_mct\_audit \- Check a FastIron switch\'s MCT configuration for mistakes\.
 * glitchwrks\.fastiron\.fastiron\_mct\_compare \- Check that two FastIron MCT peers agree\.
+* glitchwrks\.fastiron\.fastiron\_mct\_health \- Check the live state of a FastIron switch\'s MCT clusters\.
 * glitchwrks\.fastiron\.fastiron\_model\_config \- Validate a FastIron configuration model\.
+* glitchwrks\.fastiron\.fastiron\_parse\_cluster\_status \- Parse the output of FastIron\'s show cluster command\.
 * glitchwrks\.fastiron\.fastiron\_parse\_config \- Parse a FastIron running configuration\.
 
 <a id="new-modules"></a>

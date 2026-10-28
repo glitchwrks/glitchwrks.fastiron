@@ -1,0 +1,53 @@
+# Copyright: (c) 2026, Glitch Works, LLC
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+DOCUMENTATION:
+  name: fastiron_mct_health
+  author: Jonathan Chapman (@glitchwrks)
+  version_added: 0.1.0
+  short_description: Check the live state of a FastIron switch's MCT clusters
+  description:
+    - Checks the output of C(show cluster) for MCT clusters that are not working, such as a cluster that
+      is not deployed, a peer that cannot be reached over the keep-alive VLAN, a peer whose cluster control
+      protocol (CCP) session is not up, VLANs not active with the peer, and clients that are not up.
+    - Given the switch's running configuration, it also reports deployed clusters and clients that
+      C(show cluster) does not show.
+    - P(glitchwrks.fastiron.fastiron_mct_audit#filter) checks the configuration itself.
+  positional: config
+  options:
+    _input:
+      description: The output of C(show cluster), or cluster status parsed by
+        P(glitchwrks.fastiron.fastiron_parse_cluster_status#filter).
+      type: raw
+      required: true
+    config:
+      description: The switch's running configuration, as text or parsed by
+        P(glitchwrks.fastiron.fastiron_parse_config#filter).
+      type: raw
+
+EXAMPLES: |
+  - name: Get the running configuration
+    ansible.netcommon.cli_command:
+      command: show running-config
+    register: running
+
+  - name: Get the live state of the MCT clusters
+    ansible.netcommon.cli_command:
+      command: show cluster
+    register: cluster
+
+  - name: Fail when an MCT cluster isn't working
+    vars:
+      findings: "{{ cluster.stdout | glitchwrks.fastiron.fastiron_mct_health(running.stdout) }}"
+    ansible.builtin.assert:
+      that: findings | selectattr('severity', '==', 'error') | list | length == 0
+      fail_msg: "{{ findings | map(attribute='message') }}"
+
+RETURN:
+  _value:
+    description:
+      - A list of findings, empty when nothing was found.
+      - Each finding has C(severity) (C(error) or C(warning)), C(rule), C(cluster) and C(message).
+    type: list
+    elements: dict

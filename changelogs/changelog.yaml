@@ -31,10 +31,16 @@ releases:
       - description: Check that two FastIron MCT peers agree.
         name: fastiron_mct_compare
         namespace: null
+      - description: Check the live state of a FastIron switch's MCT clusters.
+        name: fastiron_mct_health
+        namespace: null
       - description: Validate a FastIron configuration model.
         name: fastiron_model_config
+        namespace: null
+      - description: Parse the output of FastIron's show cluster command.
+        name: fastiron_parse_cluster_status
         namespace: null
       - description: Parse a FastIron running configuration.
         name: fastiron_parse_config
         namespace: null
-    release_date: '2026-10-27'
+    release_date: '2026-10-28'
