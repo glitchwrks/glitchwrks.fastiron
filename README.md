@@ -21,6 +21,7 @@ CLI are likely to work, but have not been tested.
 | `glitchwrks.fastiron.fastiron_config_drift` | filter | Reports how a running configuration differs from a model |
 | `glitchwrks.fastiron.fastiron_config_commands` | filter | Generates the commands that add what a switch is missing from a model |
 | `glitchwrks.fastiron.fastiron_config_removals` | filter | Generates the commands that remove ports from VLANs that a model doesn't list |
+| `glitchwrks.fastiron.fastiron_config_undeploy` | filter | Lists the MCT clusters to undeploy around changes to their keep-alive VLAN |
 | `glitchwrks.fastiron.fastiron_parse_cluster_status` | filter | Parses the live state of MCT clusters from `show cluster` |
 | `glitchwrks.fastiron.fastiron_mct_health` | filter | Checks `show cluster` for MCT clusters, peers and clients that aren't working |
 | `glitchwrks.fastiron.fastiron_mct_health_compare` | filter | Checks both MCT peers' `show cluster` together, for split-brain |

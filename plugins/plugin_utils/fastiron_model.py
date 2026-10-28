@@ -281,10 +281,15 @@ def config_drift(running, model, remove=None, protected_vlans=None):
                     findings.append(_finding('error', 'vlan_ports_missing', obj, 'VLAN %d is missing %s port(s) %s'
                                              % (vid, kind, ', '.join(missing)), True))
                 if extra:
+                    _named, partial = _lag_removal(current, extra)
+                    note = ''
+                    if vid in protected:
+                        note = ' (protected VLAN)'
+                    elif partial:
+                        note = ' (part of deployed LAG %s; list all of its ports or none)' % ', '.join(partial)
                     findings.append(_finding('error', 'vlan_ports_extra', obj, 'VLAN %d has extra %s port(s) %s%s'
-                                             % (vid, kind, ', '.join(extra),
-                                                ' (protected VLAN)' if vid in protected else ''),
-                                             'vlan_ports' in removable and vid not in protected))
+                                             % (vid, kind, ', '.join(extra), note),
+                                             'vlan_ports' in removable and vid not in protected and not partial))
             if vlan['router_interface'] != have['router_interface']:
                 fixable = have['router_interface'] is None
                 findings.append(_finding('error', 'vlan_router_interface', obj,
@@ -502,6 +507,59 @@ def config_commands(running, model):
     return lines
 
 
+def _lag_removal(current, ports):
+    """Split ports to remove from a VLAN by deployed LAG.
+
+    FastIron changes the VLANs of a deployed LAG through its primary port only,
+    and refuses its other ports. Returns (ports to name in the command, names
+    of deployed LAGs only some of whose ports are to be removed, which can't
+    be done).
+    """
+    named = []
+    partial = []
+    remaining = set(ports)
+    for name, lag in sorted(current['lags'].items()):
+        members = set(lag['ports'])
+        if not lag['deployed'] or not members & remaining:
+            continue
+        if members <= remaining:
+            named.append(lag['primary_port'] or sorted(members, key=_port_key)[0])
+        else:
+            partial.append(name)
+        remaining -= members
+    return sorted(set(named) | remaining, key=_port_key), partial
+
+
+def clusters_to_undeploy(running, model, remove=None, protected_vlans=None):
+    """Return the deployed clusters, as {name, id}, whose keep-alive VLAN's ports
+    the changes from config_commands() and config_removals() touch.
+
+    FastIron refuses to change a deployed cluster's keep-alive VLAN, so the
+    cluster has to be undeployed around those changes.
+    """
+    current = _parsed(running)
+    want, managed = normalize_model(model)
+    removable, protected = _removal_settings(current, want, remove, protected_vlans)
+    result = []
+    if 'vlans' not in managed:
+        return result
+    for name, cluster in sorted(current['clusters'].items()):
+        vid = cluster['keep_alive_vlan']
+        if not cluster['deployed'] or vid is None or vid not in want['vlans']:
+            continue
+        vlan, have = want['vlans'][vid], current['vlans'].get(vid, {'tagged': [], 'untagged': []})
+        changes = False
+        for kind in ('tagged', 'untagged'):
+            if set(vlan[kind]) - set(have[kind]):
+                changes = True
+            if 'vlan_ports' in removable and vid not in protected:
+                named, _partial = _lag_removal(current, set(have[kind]) - set(vlan[kind]))
+                changes = changes or bool(named)
+        if changes:
+            result.append({'name': name, 'id': cluster['id']})
+    return result
+
+
 def config_removals(running, model, protected_vlans=None):
     """Return the configuration lines that remove ports from VLANs the model
     manages but doesn't list them in, nested by indenting one space.
@@ -522,9 +580,9 @@ def config_removals(running, model, protected_vlans=None):
             continue
         body = []
         for kind in ('tagged', 'untagged'):
-            extra = sorted(set(have[kind]) - set(vlan[kind]), key=_port_key)
-            if extra:
-                body.append(' no %s %s' % (kind, format_ports(extra)))
+            named, _partial = _lag_removal(current, set(have[kind]) - set(vlan[kind]))
+            if named:
+                body.append(' no %s %s' % (kind, format_ports(named)))
         if body:
             lines.append('vlan %d' % vid)
             lines.extend(body)

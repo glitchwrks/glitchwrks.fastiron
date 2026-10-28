@@ -70,7 +70,15 @@ def test_removals_filter(cs1a):
     model = filters['fastiron_parse_config'](cs1a)
     model = {key: model[key] for key in ('vlans', 'lags', 've_addresses', 'clusters')}
     model['vlans'][3001]['tagged'] = ['1/1/40']
-    assert filters['fastiron_config_removals'](cs1a, model) == ['vlan 3001', ' no tagged ethe 1/1/7 to 1/1/8']
+    assert filters['fastiron_config_removals'](cs1a, model) == ['vlan 3001', ' no tagged ethe 1/1/7']
+    assert filters['fastiron_config_undeploy'](cs1a, model, ['vlan_ports']) == [{'name': 'ALB-CORE', 'id': 4000}]
     assert filters['fastiron_config_removals'](cs1a, model, protected_vlans=[3001]) == []
     with pytest.raises(AnsibleFilterError, match='fastiron_config_drift: remove must be'):
         filters['fastiron_config_drift'](cs1a, model, remove=['everything'])
+
+
+def test_mct_health_takes_interfaces_text(cs1a):
+    with open(os.path.join(FIXTURES, 'cs1a_show_interface_brief_icl_link_down.txt')) as f:
+        interfaces = f.read()
+    findings = FilterModule().filters()['fastiron_mct_health']('', cs1a, interfaces)
+    assert 'icl_port_down' in [f['rule'] for f in findings]

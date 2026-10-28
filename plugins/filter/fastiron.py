@@ -16,6 +16,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
     parse_config,
 )
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_model import (
+    clusters_to_undeploy,
     config_commands,
     config_drift,
     config_removals,
@@ -25,6 +26,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_statu
     mct_health,
     mct_health_compare,
     parse_cluster_status,
+    parse_interface_brief,
 )
 
 
@@ -87,14 +89,28 @@ def fastiron_parse_cluster_status(text):
     return _status(text, 'fastiron_parse_cluster_status')
 
 
-def fastiron_mct_health(status, config=None):
+def _interfaces(value, filter_name):
+    if value is None or isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        return parse_interface_brief(value)
+    raise AnsibleFilterError('%s: expected "show interface brief" output, got %s' % (filter_name, type(value).__name__))
+
+
+def fastiron_mct_health(status, config=None, interfaces=None):
     return mct_health(_status(status, 'fastiron_mct_health'),
-                      None if config is None else _parsed(config, 'fastiron_mct_health'))
+                      None if config is None else _parsed(config, 'fastiron_mct_health'),
+                      _interfaces(interfaces, 'fastiron_mct_health'))
 
 
 def fastiron_mct_health_compare(status, peer_status, name='this switch', peer_name='its peer'):
     return mct_health_compare(_status(status, 'fastiron_mct_health_compare'),
                               _status(peer_status, 'fastiron_mct_health_compare'), name, peer_name)
+
+
+def fastiron_config_undeploy(config, model, remove=None, protected_vlans=None):
+    return _model_call('fastiron_config_undeploy', clusters_to_undeploy, _parsed(config, 'fastiron_config_undeploy'),
+                       model, remove, protected_vlans)
 
 
 def fastiron_config_removals(config, model, protected_vlans=None):
@@ -113,6 +129,7 @@ class FilterModule(object):
             'fastiron_config_drift': fastiron_config_drift,
             'fastiron_config_commands': fastiron_config_commands,
             'fastiron_config_removals': fastiron_config_removals,
+            'fastiron_config_undeploy': fastiron_config_undeploy,
             'fastiron_parse_cluster_status': fastiron_parse_cluster_status,
             'fastiron_mct_health': fastiron_mct_health,
             'fastiron_mct_health_compare': fastiron_mct_health_compare,

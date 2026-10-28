@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_config import icl_ports
+
 _CLUSTER_RE = re.compile(r'^Cluster\s+(\S+)\s+(\d+)\s*$')
 _RBRIDGE_RE = re.compile(r'(?<!Peer )Rbridge Id:\s*(\d+)')
 _SESSION_VLAN_RE = re.compile(r'Session Vlan:\s*(\d+)')
@@ -34,6 +36,12 @@ _ICL_ROW_RE = re.compile(r'^(\S+)\s+(\d+(?:/\d+)+)(?:\s+(\d+))?\s*$')
 # Name, rbridge id, configuration state (which may be more than one word),
 # port, LAG id (blank for a client on a single port) and FSM state.
 _CLIENT_ROW_RE = re.compile(r'^(\S+)\s+(\d+)\s+(.+?)\s+(\d+(?:/\d+)+|N/A|None|-)\s+(?:(\d+)\s+)?(\S.*?)\s*$')
+
+# A port row of "show interface brief": port, link, state, duplex, speed,
+# trunk (LAG), tag, PVID, priority, MAC address and an optional name.
+_INTERFACE_ROW_RE = re.compile(r'^(\d+(?:/\d+)+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+'
+                               r'([0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4})\s*(.*?)\s*$', re.I)
+LINK_UP = 'Up'
 
 PEER_REACHABLE = 'Peer Reachable'
 CLUSTER_DEPLOYED = 'Deploy'
@@ -155,18 +163,54 @@ def parse_cluster_status(text):
     return {'clusters': clusters}
 
 
+def parse_interface_brief(text):
+    """Parse "show interface brief" output into {port: {...}}."""
+    ports = {}
+    for raw in text.splitlines():
+        m = _INTERFACE_ROW_RE.match(raw.strip())
+        if m:
+            ports[m.group(1)] = dict(zip(
+                ('link', 'state', 'duplex', 'speed', 'trunk', 'tag', 'pvid', 'priority', 'mac'), m.groups()[1:10]))
+            ports[m.group(1)]['name'] = m.group(11) or None
+    return ports
+
+
 def _finding(severity, rule, cluster, message):
     return {'severity': severity, 'rule': rule, 'cluster': cluster, 'message': message}
 
 
-def mct_health(status, config=None):
+def _icl_links(config, interfaces):
+    findings = []
+    for name, cluster in sorted(config['clusters'].items()):
+        if not cluster['deployed']:
+            continue
+        ports = icl_ports(config, cluster)
+        down = [port for port in ports if port in interfaces and interfaces[port]['link'] != LINK_UP]
+        for port in ports:
+            if port not in interfaces:
+                findings.append(_finding('warning', 'icl_port_unknown', name,
+                                         'cluster %s: ICL port %s is not in the interface list' % (name, port)))
+            elif port in down:
+                findings.append(_finding('error', 'icl_port_down', name,
+                                         'cluster %s: ICL port %s is down (%s); %s'
+                                         % (name, port, interfaces[port]['link'],
+                                            'the ICL is down' if len(down) == len(ports)
+                                            else 'the ICL has lost redundancy')))
+    return findings
+
+
+def mct_health(status, config=None, interfaces=None):
     """Check parsed "show cluster" output for MCT clusters that aren't working.
 
     With a parsed running configuration, also check that each deployed cluster
-    and client in it shows up in the status. Returns a list of findings.
+    and client in it shows up in the status, and, with parsed "show interface
+    brief" output, that each ICL port's link is up. Returns a list of findings.
     """
     findings = []
     clusters = status['clusters']
+
+    if config is not None and interfaces is not None:
+        findings.extend(_icl_links(config, interfaces))
 
     if config is not None:
         for name, configured in sorted(config['clusters'].items()):
