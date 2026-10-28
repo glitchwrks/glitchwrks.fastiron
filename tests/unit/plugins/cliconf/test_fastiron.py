@@ -91,6 +91,18 @@ def test_steps_out_of_nested_blocks_before_shallower_lines(cliconf, running):
     ]
 
 
+def test_lines_the_switch_pads_with_extra_spaces_match(cliconf, running):
+    running += 'ip ssh  password-authentication no\nip ssh  interactive-authentication no\n'
+    candidate = 'ip ssh password-authentication no\nip ssh interactive-authentication no\n'
+    assert diff(cliconf, candidate, running) == ''
+
+
+def test_extra_spaces_in_the_candidate_are_collapsed_and_nesting_kept(cliconf, running):
+    candidate = 'cluster ALB-CORE 4000\n client  c2960h\n  rbridge-id\t201\n'
+    assert diff(cliconf, candidate, running).splitlines() == [
+        'cluster ALB-CORE 4000', 'client c2960h', 'rbridge-id 201']
+
+
 def test_diff_ignore_lines(cliconf, running):
     candidate = 'hostname cs1a.example.net\nlogging buffered 500\n'
     assert diff(cliconf, candidate, running, diff_ignore_lines=[r'^logging ']) == ''

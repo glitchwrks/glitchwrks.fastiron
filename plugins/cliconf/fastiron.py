@@ -47,6 +47,9 @@ NON_CONFIG_LINES = [r'^Current configuration:', r'^ver ', r'^end$']
 _SW_VERSION_RE = re.compile(r'SW: Version (\S+)')
 _HW_RE = re.compile(r'HW: (?:Stackable )?(.+)')
 _HOSTNAME_RE = re.compile(r'^hostname (\S+)', re.M)
+# Spaces or tabs after the first word of a line. FastIron pads some lines
+# ("ip ssh  password-authentication no").
+_INNER_SPACE_RE = re.compile(r'(?<=\S)[ \t]+')
 
 # "write memory" prints "Write startup-config done." and the prompt, and only then
 # copies to flash, printing the lines below with no prompt after them. Without
@@ -54,6 +57,18 @@ _HOSTNAME_RE = re.compile(r'^hostname (\S+)', re.M)
 _WRITE_MEMORY_RE = re.compile(r'^\s*wr\w*\s+mem\w*\s*$', re.I)
 _WRITE_DONE = 'Write startup-config done'
 _FLASH_DONE = 'Flash to Flash Done'
+
+
+def normalize_spacing(text):
+    """Collapse runs of spaces inside each configuration line.
+
+    FastIron prints some lines with extra spaces, so a candidate written the usual
+    way would never match them, and be pushed again on every run. Indentation, which
+    marks nesting, is kept.
+    """
+    if not isinstance(text, str):
+        text = '\n'.join(text)
+    return '\n'.join(_INNER_SPACE_RE.sub(' ', line).rstrip() for line in text.splitlines())
 
 
 def to_commands(items):
@@ -162,10 +177,11 @@ class Cliconf(CliconfBase):
 
         ignore_lines = NON_CONFIG_LINES + to_list(diff_ignore_lines)
         candidate_obj = NetworkConfig(indent=CONFIG_INDENT, ignore_lines=ignore_lines)
-        candidate_obj.load(candidate)
+        candidate_obj.load(normalize_spacing(candidate))
 
         if running and diff_match != 'none':
-            running_obj = NetworkConfig(indent=CONFIG_INDENT, contents=running, ignore_lines=ignore_lines)
+            running_obj = NetworkConfig(indent=CONFIG_INDENT, contents=normalize_spacing(running),
+                                        ignore_lines=ignore_lines)
             changes = candidate_obj.difference(running_obj, path=path, match=diff_match, replace=diff_replace)
         else:
             changes = candidate_obj.items
