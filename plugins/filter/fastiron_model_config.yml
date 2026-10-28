@@ -1,0 +1,78 @@
+# Copyright: (c) 2026, Glitch Works, LLC
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+DOCUMENTATION:
+  name: fastiron_model_config
+  author: Jonathan Chapman (@glitchwrks)
+  version_added: 0.1.0
+  short_description: Validate a FastIron configuration model
+  description:
+    - Validates a model of a switch's VLANs, LAGs, VE interface addresses and MCT clusters, and returns it in
+      the shape P(glitchwrks.fastiron.fastiron_parse_config#filter) returns, with defaults filled in.
+    - The result can be checked with P(glitchwrks.fastiron.fastiron_mct_audit#filter) and
+      P(glitchwrks.fastiron.fastiron_mct_compare#filter) before any switch is changed.
+    - Models are compared with running configurations by P(glitchwrks.fastiron.fastiron_config_drift#filter),
+      and turned into commands by P(glitchwrks.fastiron.fastiron_config_commands#filter).
+    - Because a model has the same shape as a parsed configuration, a parsed running configuration is a valid
+      model, which is a quick way to start one.
+  options:
+    _input:
+      description:
+        - The model, a dictionary with any of the keys below. Only the sections a model has are compared
+          with a running configuration; the others are left alone.
+        - C(vlans) maps VLAN ids to C(name) (one word), C(tagged) and C(untagged) (lists of ports such as
+          V(1/1/7), or strings in switch syntax such as V(ethe 1/1/7 to 1/1/8)), and C(router_interface)
+          (a VE number).
+        - C(lags) maps LAG names to C(type) (V(static) or V(dynamic)), C(id), C(ports), C(primary_port)
+          (defaults to the first port) and C(deployed) (defaults to V(true)).
+        - C(ve_addresses) maps VE numbers to lists of addresses, with a prefix length or a netmask, such as
+          V(10.0.1.2/24).
+        - C(clusters) maps MCT cluster names to C(id), C(rbridge_id), C(session_vlan), C(keep_alive_vlan),
+          C(icl) (C(name) and C(ports)), C(peers) (a list of C(address), C(rbridge_id) and C(icl), which
+          defaults to the cluster's ICL), C(deployed) (defaults to V(true)) and C(clients). C(clients) maps
+          client names to C(rbridge_id), C(interfaces) and C(deployed) (defaults to V(true)).
+      type: dict
+      required: true
+
+EXAMPLES: |
+  # group_vars: the VLANs, ICL LAG and cluster both MCT peers share
+  fastiron_model:
+    vlans:
+      1000:
+        tagged: [1/1/2, 1/1/7, 1/1/8]
+      3000:
+        name: Session-VLAN
+        tagged: ethe 1/1/7 to 1/1/8
+        router_interface: 3000
+    lags:
+      MCT_lag1: {type: static, id: 2, ports: [1/1/7, 1/1/8]}
+    clusters:
+      ALB-CORE:
+        id: 4000
+        session_vlan: 3000
+        keep_alive_vlan: 3001
+        icl: {name: ALB-CORE-MCT, ports: [1/1/7]}
+        clients:
+          c2960g: {rbridge_id: 200, interfaces: [1/1/2]}
+
+  # host_vars: what differs between the peers, combined with the shared model with
+  # fastiron_model | ansible.builtin.combine(fastiron_host_model, recursive=true)
+  fastiron_host_model:
+    ve_addresses:
+      3000: [10.0.1.2/24]
+    clusters:
+      ALB-CORE:
+        rbridge_id: 2
+        peers: [{address: 10.0.1.3, rbridge_id: 3}]
+
+  - name: Check the model before changing anything
+    vars:
+      model: "{{ fastiron_model | ansible.builtin.combine(fastiron_host_model, recursive=true) }}"
+    ansible.builtin.assert:
+      that: model | glitchwrks.fastiron.fastiron_model_config | glitchwrks.fastiron.fastiron_mct_audit | length == 0
+
+RETURN:
+  _value:
+    description: The model in the shape P(glitchwrks.fastiron.fastiron_parse_config#filter) returns.
+    type: dict
