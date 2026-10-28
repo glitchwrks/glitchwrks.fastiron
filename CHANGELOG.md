@@ -7,6 +7,7 @@
     - <a href="#new-plugins">New Plugins</a>
         - <a href="#cliconf">Cliconf</a>
         - <a href="#filter">Filter</a>
+    - <a href="#new-modules">New Modules</a>
 
 <a id="v0-1-0"></a>
 ## v0\.1\.0
@@ -30,3 +31,8 @@ Initial release\. Ansible support for Brocade / Ruckus FastIron switches over <c
 * glitchwrks\.fastiron\.fastiron\_mct\_audit \- Check a FastIron switch\'s MCT configuration for mistakes\.
 * glitchwrks\.fastiron\.fastiron\_mct\_compare \- Check that two FastIron MCT peers agree\.
 * glitchwrks\.fastiron\.fastiron\_parse\_config \- Parse a FastIron running configuration\.
+
+<a id="new-modules"></a>
+### New Modules
+
+* glitchwrks\.fastiron\.fastiron\_ssh\_keys \- Manage the SSH client public keys of a FastIron switch\.
