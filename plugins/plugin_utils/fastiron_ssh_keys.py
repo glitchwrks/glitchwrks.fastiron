@@ -14,6 +14,7 @@ import base64
 import binascii
 import re
 import struct
+import time
 
 # FastIron 08.0.30 accepts RSA keys of up to 2048 bits, and DSA keys.
 SUPPORTED_TYPES = ('ssh-rsa', 'ssh-dss')
@@ -101,3 +102,44 @@ def to_rfc4716(bodies):
         lines.extend(body[i:i + 70] for i in range(0, len(body), 70))
         lines.append('---- END SSH2 PUBLIC KEY ----')
     return '\n'.join(lines) + '\n'
+
+
+def _scp_ack(channel, timeout):
+    """Wait for the SCP server to accept the last step, or raise with its message."""
+    deadline = time.monotonic() + timeout
+    reply = b''
+    while True:
+        if reply[:1] == b'\0':
+            return
+        if reply[:1] in (b'\x01', b'\x02') and b'\n' in reply:
+            message = reply[1:].split(b'\n', 1)[0].decode('utf-8', 'replace').strip()
+            raise FastIronKeyError('the switch refused the key file: %s' % message)
+        if reply and reply[:1] not in (b'\x01', b'\x02'):
+            raise FastIronKeyError('unexpected reply from the switch\'s SCP server: %r' % reply[:80])
+        if time.monotonic() > deadline:
+            raise FastIronKeyError('timed out waiting for the switch\'s SCP server')
+        ready = channel.poll(timeout=100)
+        if ready < 0 or (ready == 0 and channel.is_eof):
+            raise FastIronKeyError('the switch closed the SCP connection')
+        if ready:
+            chunk = channel.recv(1024)
+            if chunk is None:
+                raise FastIronKeyError('the switch closed the SCP connection')
+            reply += chunk
+
+
+def scp_send(channel, name, data, timeout=30):
+    """Upload data as name with the SCP protocol, on an open pylibssh channel.
+
+    libssh shell-quotes the target of "scp -t", which FastIron does not unquote: it
+    accepts the request, then refuses the file with "Wrong file name is specified".
+    Send the request the way OpenSSH's scp does, unquoted.
+    """
+    channel.request_exec('scp -t %s' % name)
+    _scp_ack(channel, timeout)
+    channel.write(b'C0644 %d %s\n' % (len(data), name.encode('ascii')))
+    _scp_ack(channel, timeout)
+    channel.write(data)
+    channel.write(b'\0')
+    _scp_ack(channel, timeout)
+    channel.send_eof()

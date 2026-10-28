@@ -28,15 +28,71 @@ RSA = key('rsa2048.pub')
 DSA = key('dsa.pub')
 
 
+class FakeScpChannel:
+    """An SCP sink on its own SSH channel, as FastIron's: one file, named sshPubKey."""
+
+    def __init__(self, switch):
+        self.switch = switch
+        self.command = None
+        self.received = b''
+        self.replies = []
+        self.closed = False
+
+    def request_exec(self, command):
+        self.command = command
+        self.replies.append(b'\0')
+
+    def poll(self, timeout=-1):
+        return len(self.replies[0]) if self.replies else 0
+
+    @property
+    def is_eof(self):
+        return not self.replies
+
+    def recv(self, size=1024):
+        return self.replies.pop(0)
+
+    def write(self, data):
+        self.received += data
+        if self.received.endswith(b'\n') and self.received.count(b'\n') == 1:
+            self.replies.append(b'\0' if self.command == 'scp -t sshPubKey'
+                                else b'\x01Wrong file name is specified\n')
+        elif self.received.endswith(b'\0'):
+            content = self.received.split(b'\n', 1)[1][:-1].decode()
+            self.switch.uploads.append((self.command, content))
+            if self.switch.accept_uploads:
+                self.switch.listing = content
+            self.replies.append(b'\0')
+        return len(data)
+
+    def send_eof(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
 class FakeSwitch:
     """Stands in for the switch: its key list, read over the persistent connection's
     CLI session, and SCP uploads, made over a separate SSH connection."""
 
-    def __init__(self, keys=()):
-        self.listing = to_rfc4716([k.split()[1] for k in keys]) if keys else ''
+    def __init__(self):
+        self.listing = ''
         self.uploads = []
         self.accept_uploads = True
-        self.ssh = MagicMock()
+        self.channels = []
+        # The libssh connection used for uploads; its session is set by _connect().
+        self.ssh = MagicMock(spec=['_connect', 'close'])
+        self.ssh._connect.side_effect = self.connect
+
+    def connect(self):
+        self.ssh.ssh = MagicMock()
+        self.ssh.ssh.new_channel.side_effect = self.new_channel
+
+    def new_channel(self):
+        channel = FakeScpChannel(self)
+        self.channels.append(channel)
+        return channel
 
     def get(self, command):
         assert command == 'show ip client-pub-key'
@@ -44,13 +100,6 @@ class FakeSwitch:
 
     def get_option(self, name):
         return 30
-
-    def copy_file(self, source, destination, proto, timeout):
-        with open(source) as f:
-            content = f.read()
-        self.uploads.append((destination, proto, content))
-        if self.accept_uploads:
-            self.listing = content
 
 
 @pytest.fixture
@@ -69,7 +118,6 @@ def run(switch, keys, check_mode=False, diff=False, connection='ansible.netcommo
     task.diff = diff
     play_context = MagicMock(connection=connection, check_mode=check_mode)
     task_connection = MagicMock(socket_path='/dev/null', ssh_type='libssh', ssh_type_conn=switch.ssh)
-    task_connection.copy_file.side_effect = switch.copy_file
     action = ActionModule(task, task_connection, play_context,
                           loader=None, templar=None, shared_loader_obj=None)
     return action.run(task_vars={})
@@ -80,8 +128,9 @@ def test_uploads_when_the_list_differs(switch):
     result = run(switch, [RSA])
     assert result['changed'] is True
     assert not result.get('failed')
-    assert switch.uploads == [('sshPubKey', 'scp', to_rfc4716([RSA.split()[1]]))]
+    assert switch.uploads == [('scp -t sshPubKey', to_rfc4716([RSA.split()[1]]))]
     # The separate SSH connection used for the upload is closed again.
+    assert [c.closed for c in switch.channels] == [True]
     switch.ssh.close.assert_called_once_with()
 
 
@@ -94,13 +143,10 @@ def test_no_upload_when_the_list_matches_in_any_order(switch):
 
 
 def test_failed_upload_connection_is_reported(switch):
-    def refuse(**kwargs):
-        raise AnsibleError('ssh connect failed')
-    switch.copy_file = refuse
-    # A libssh connection that never connected has no session to close.
-    del switch.ssh.ssh
+    switch.ssh._connect.side_effect = AnsibleError('ssh connect failed')
     with pytest.raises(AnsibleError, match='ssh connect failed'):
         run(switch, [RSA])
+    # A libssh connection that never connected has no session to close.
     switch.ssh.close.assert_not_called()
 
 
@@ -127,6 +173,19 @@ def test_rejects_unusable_keys_before_touching_the_switch(switch, keys, message)
     result = run(switch, keys)
     assert result['failed'] is True
     assert message in result['msg']
+    assert switch.uploads == []
+
+
+def test_requires_libssh_for_uploads(switch, mocker):
+    task_connection = MagicMock(socket_path='/dev/null', ssh_type='paramiko')
+    task = Task()
+    task.action = 'glitchwrks.fastiron.fastiron_ssh_keys'
+    task.args = {'keys': [RSA]}
+    action = ActionModule(task, task_connection, MagicMock(connection='ansible.netcommon.network_cli'),
+                          loader=None, templar=None, shared_loader_obj=None)
+    result = action.run(task_vars={})
+    assert result['failed'] is True
+    assert 'libssh' in result['msg']
     assert switch.uploads == []
 
 
