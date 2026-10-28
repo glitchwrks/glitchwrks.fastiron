@@ -20,6 +20,7 @@ CLI are likely to work, but have not been tested.
 | `glitchwrks.fastiron.fastiron_model_config` | filter | Validates a model of a switch's VLANs, LAGs, VE addresses and MCT clusters |
 | `glitchwrks.fastiron.fastiron_config_drift` | filter | Reports how a running configuration differs from a model |
 | `glitchwrks.fastiron.fastiron_config_commands` | filter | Generates the commands that add what a switch is missing from a model |
+| `glitchwrks.fastiron.fastiron_config_removals` | filter | Generates the commands that remove ports from VLANs that a model doesn't list |
 | `glitchwrks.fastiron.fastiron_parse_cluster_status` | filter | Parses the live state of MCT clusters from `show cluster` |
 | `glitchwrks.fastiron.fastiron_mct_health` | filter | Checks `show cluster` for MCT clusters, peers and clients that aren't working |
 | `glitchwrks.fastiron.fastiron_mct_health_compare` | filter | Checks both MCT peers' `show cluster` together, for split-brain |
@@ -254,6 +255,12 @@ A model describes a switch's VLANs, LAGs, VE addresses and MCT clusters, in the 
 Changes are additive: missing VLANs, ports, VE addresses, LAGs, clusters and clients are added,
 and anything undeployed is deployed. Removing something, or changing a LAG or cluster in place,
 usually means undeploying it first, so those differences are only reported, for you to fix by hand.
+
+`fastiron_config_removals` can also remove ports from the model's VLANs that the model doesn't
+list for them. Send its lines after the additions, so a port's replacement is in place first.
+Protected VLANs, given as `protected_vlans`, are left alone, and each cluster's session VLAN is
+always protected. Pass the same `remove=['vlan_ports']` and `protected_vlans` to
+`fastiron_config_drift`, so it reports those differences as fixable.
 
 ## Development
 

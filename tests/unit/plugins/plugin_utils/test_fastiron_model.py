@@ -19,6 +19,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_model import (
     config_commands,
     config_drift,
+    config_removals,
     format_ports,
     normalize_model,
 )
@@ -200,3 +201,58 @@ def test_models_can_be_checked_like_running_configurations():
     assert mct_compare(a, b) == []
     b['clusters']['ALB-CORE']['rbridge_id'] = 2
     assert 'rbridge_id_duplicate' in [f['rule'] for f in mct_compare(a, b)]
+
+
+def test_moving_keep_alive_off_the_icl(cs1a, model):
+    # Keep-alive VLAN 3001 moves from the ICL (1/1/7-8) to its own link.
+    model['vlans'][3001]['tagged'] = ['1/1/40']
+    assert config_commands(cs1a, model) == ['vlan 3001', ' tagged ethe 1/1/40']
+    assert config_removals(cs1a, model) == ['vlan 3001', ' no tagged ethe 1/1/7 to 1/1/8']
+
+
+def test_removals_cover_tagged_and_untagged_ports(cs1a, model):
+    running = cs1a.replace('vlan 1000 by port\n', 'vlan 1000 by port\n untagged ethe 1/1/20\n')
+    model['vlans'][1000]['tagged'] = ['1/1/2']
+    assert config_removals(running, model) == [
+        'vlan 1000', ' no tagged ethe 1/1/7 to 1/1/8', ' no untagged ethe 1/1/20']
+
+
+def test_nothing_to_remove(cs1a, model):
+    assert config_removals(cs1a, model) == []
+
+
+def test_vlans_not_in_the_model_are_left_alone(cs1a, model):
+    del model['vlans'][1000]
+    assert config_removals(cs1a, model) == []
+
+
+def test_session_vlan_is_protected(cs1a, model):
+    model['vlans'][3000]['tagged'] = ['1/1/7']
+    assert config_removals(cs1a, model) == []
+    [finding] = config_drift(cs1a, model, remove=['vlan_ports'])
+    assert (finding['rule'], finding['fixable']) == ('vlan_ports_extra', False)
+    assert finding['message'] == 'VLAN 3000 has extra tagged port(s) 1/1/8 (protected VLAN)'
+
+
+def test_protected_vlans_are_left_alone(cs1a, model):
+    model['vlans'][1000]['tagged'] = ['1/1/2']
+    assert config_removals(cs1a, model, protected_vlans=[1000]) == []
+    findings = config_drift(cs1a, model, remove=['vlan_ports'], protected_vlans=[1000])
+    assert rules(findings) == [('vlan_ports_extra', False)]
+
+
+def test_extra_ports_are_fixable_only_when_removal_is_asked_for(cs1a, model):
+    model['vlans'][1000]['tagged'] = ['1/1/2']
+    assert rules(config_drift(cs1a, model)) == [('vlan_ports_extra', False)]
+    assert rules(config_drift(cs1a, model, remove=['vlan_ports'])) == [('vlan_ports_extra', True)]
+
+
+@pytest.mark.parametrize('kwargs, message', [
+    ({'remove': ['vlans']}, 'remove must be a list of: vlan_ports'),
+    ({'remove': 'vlan_ports'}, 'remove must be a list of: vlan_ports'),
+    ({'protected_vlans': 10}, 'protected_vlans must be a list'),
+    ({'protected_vlans': ['ten']}, 'protected VLAN'),
+])
+def test_invalid_removal_settings(cs1a, model, kwargs, message):
+    with pytest.raises(FastIronConfigError, match=message):
+        config_drift(cs1a, model, **kwargs)
