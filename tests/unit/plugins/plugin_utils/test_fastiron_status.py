@@ -14,6 +14,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_statu
     mct_health,
     mct_health_compare,
     parse_cluster_status,
+    parse_interface_brief,
 )
 
 FIXTURES = os.path.join(os.path.dirname(__file__), '..', '..', 'fixtures')
@@ -169,3 +170,50 @@ def test_split_brain_when_both_switches_are_master():
 ])
 def test_no_split_brain(a, b):
     assert mct_health_compare(parse_cluster_status(fixture(a)), parse_cluster_status(fixture(b))) == []
+
+
+def test_parses_show_interface_brief():
+    ports = parse_interface_brief(fixture('cs1a_show_interface_brief_icl_link_down.txt'))
+    assert ports == {
+        '1/1/7': {'link': 'Up', 'state': 'Forward', 'duplex': 'Full', 'speed': '10G', 'trunk': '2', 'tag': 'Yes',
+                  'pvid': 'N/A', 'priority': '0', 'mac': '0012.3456.789a', 'name': None},
+        '1/1/8': {'link': 'Down', 'state': 'None', 'duplex': 'None', 'speed': 'None', 'trunk': '2', 'tag': 'Yes',
+                  'pvid': 'N/A', 'priority': '0', 'mac': '0012.3456.789a', 'name': None},
+    }
+
+
+@pytest.fixture
+def cs1a_config():
+    return parse_config(fixture('cs1a_running_config.txt'))
+
+
+def interfaces(links):
+    return {port: {'link': link} for port, link in links.items()}
+
+
+def test_icl_link_down(cs1a_config):
+    # Captured with one ICL link's optic failed: show cluster still shows the cluster healthy.
+    ports = parse_interface_brief(fixture('cs1a_show_interface_brief_icl_link_down.txt'))
+    findings = mct_health({'clusters': {}}, cs1a_config, ports)
+    assert [(f['severity'], f['rule'], f['message']) for f in findings if f['rule'].startswith('icl')] == [
+        ('error', 'icl_port_down', 'cluster ALB-CORE: ICL port 1/1/8 is down (Down); the ICL has lost redundancy')]
+
+
+def test_whole_icl_down(cs1a_config):
+    findings = mct_health({'clusters': {}}, cs1a_config, interfaces({'1/1/7': 'Down', '1/1/8': 'Down'}))
+    assert [f['message'] for f in findings if f['rule'] == 'icl_port_down'] == [
+        'cluster ALB-CORE: ICL port 1/1/7 is down (Down); the ICL is down',
+        'cluster ALB-CORE: ICL port 1/1/8 is down (Down); the ICL is down']
+
+
+def test_icl_links_up(status_text, cs1a_config):
+    findings = health(status_text, cs1a_config)
+    assert findings == []
+    assert mct_health(parse_cluster_status(status_text), cs1a_config,
+                      interfaces({'1/1/7': 'Up', '1/1/8': 'Up'})) == []
+
+
+def test_icl_port_missing_from_the_interfaces(cs1a_config):
+    findings = mct_health({'clusters': {}}, cs1a_config, interfaces({'1/1/7': 'Up'}))
+    assert [(f['severity'], f['rule']) for f in findings if f['rule'].startswith('icl')] == [
+        ('warning', 'icl_port_unknown')]

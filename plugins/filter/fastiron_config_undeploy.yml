@@ -1,0 +1,54 @@
+# Copyright: (c) 2026, Glitch Works, LLC
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+DOCUMENTATION:
+  name: fastiron_config_undeploy
+  author: Jonathan Chapman (@glitchwrks)
+  version_added: 0.1.0
+  short_description: List the MCT clusters to undeploy around changes to a model
+  description:
+    - FastIron refuses to change the ports of a deployed cluster's keep-alive VLAN. Returns the deployed
+      clusters whose keep-alive VLAN the lines from P(glitchwrks.fastiron.fastiron_config_commands#filter)
+      and P(glitchwrks.fastiron.fastiron_config_removals#filter) change.
+    - Undeploy them (C(no deploy) in the cluster) before sending those lines, and deploy them again after.
+      While a cluster is undeployed on one switch, its clients run through the peer alone, so change one
+      switch at a time.
+  positional: model, remove, protected_vlans
+  options:
+    _input:
+      description: The running configuration, as text or parsed by
+        P(glitchwrks.fastiron.fastiron_parse_config#filter).
+      type: raw
+      required: true
+    model:
+      description: The model.
+      type: dict
+      required: true
+    remove:
+      description: What P(glitchwrks.fastiron.fastiron_config_removals#filter) is used to remove.
+      type: list
+      elements: string
+      choices:
+        vlan_ports: Ports on VLANs in the model that the model does not list.
+      default: []
+    protected_vlans:
+      description: VLANs whose ports are never removed, in addition to each cluster's session VLAN.
+      type: list
+      elements: int
+      default: []
+
+EXAMPLES: |
+  - name: Undeploy the clusters whose keep-alive VLAN changes
+    ansible.netcommon.cli_config:
+      config: |
+        cluster {{ item.name }} {{ item.id }}
+         no deploy
+      diff_match: none
+    loop: "{{ running.stdout | glitchwrks.fastiron.fastiron_config_undeploy(model, remove=['vlan_ports']) }}"
+
+RETURN:
+  _value:
+    description: A list of clusters, each with C(name) and C(id), empty when no cluster needs undeploying.
+    type: list
+    elements: dict

@@ -12,9 +12,10 @@ DOCUMENTATION:
       is not deployed, a peer that cannot be reached over the keep-alive VLAN, a peer whose cluster control
       protocol (CCP) session is not up, VLANs not active with the peer, and clients that are not up.
     - Given the switch's running configuration, it also reports deployed clusters and clients that
-      C(show cluster) does not show.
+      C(show cluster) does not show. Given C(show interface brief) as well, it reports ICL ports whose link
+      is down, which C(show cluster) does not show as long as another ICL port is up.
     - P(glitchwrks.fastiron.fastiron_mct_audit#filter) checks the configuration itself.
-  positional: config
+  positional: config, interfaces
   options:
     _input:
       description: The output of C(show cluster), or cluster status parsed by
@@ -24,6 +25,10 @@ DOCUMENTATION:
     config:
       description: The switch's running configuration, as text or parsed by
         P(glitchwrks.fastiron.fastiron_parse_config#filter).
+      type: raw
+    interfaces:
+      description: The output of C(show interface brief). Only used with O(config), which says which ports
+        are the ICL's.
       type: raw
 
 EXAMPLES: |
@@ -37,9 +42,14 @@ EXAMPLES: |
       command: show cluster
     register: cluster
 
+  - name: Get the state of the ports
+    ansible.netcommon.cli_command:
+      command: show interface brief
+    register: interfaces
+
   - name: Fail when an MCT cluster isn't working
     vars:
-      findings: "{{ cluster.stdout | glitchwrks.fastiron.fastiron_mct_health(running.stdout) }}"
+      findings: "{{ cluster.stdout | glitchwrks.fastiron.fastiron_mct_health(running.stdout, interfaces.stdout) }}"
     ansible.builtin.assert:
       that: findings | selectattr('severity', '==', 'error') | list | length == 0
       fail_msg: "{{ findings | map(attribute='message') }}"

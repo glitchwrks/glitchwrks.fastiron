@@ -18,6 +18,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
 )
 from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_model import (
     config_commands,
+    clusters_to_undeploy,
     config_drift,
     config_removals,
     format_ports,
@@ -207,14 +208,15 @@ def test_moving_keep_alive_off_the_icl(cs1a, model):
     # Keep-alive VLAN 3001 moves from the ICL (1/1/7-8) to its own link.
     model['vlans'][3001]['tagged'] = ['1/1/40']
     assert config_commands(cs1a, model) == ['vlan 3001', ' tagged ethe 1/1/40']
-    assert config_removals(cs1a, model) == ['vlan 3001', ' no tagged ethe 1/1/7 to 1/1/8']
+    # 1/1/7-8 are the ICL's LAG, changed through its primary port.
+    assert config_removals(cs1a, model) == ['vlan 3001', ' no tagged ethe 1/1/7']
 
 
 def test_removals_cover_tagged_and_untagged_ports(cs1a, model):
     running = cs1a.replace('vlan 1000 by port\n', 'vlan 1000 by port\n untagged ethe 1/1/20\n')
     model['vlans'][1000]['tagged'] = ['1/1/2']
     assert config_removals(running, model) == [
-        'vlan 1000', ' no tagged ethe 1/1/7 to 1/1/8', ' no untagged ethe 1/1/20']
+        'vlan 1000', ' no tagged ethe 1/1/7', ' no untagged ethe 1/1/20']
 
 
 def test_nothing_to_remove(cs1a, model):
@@ -256,3 +258,45 @@ def test_extra_ports_are_fixable_only_when_removal_is_asked_for(cs1a, model):
 def test_invalid_removal_settings(cs1a, model, kwargs, message):
     with pytest.raises(FastIronConfigError, match=message):
         config_drift(cs1a, model, **kwargs)
+
+
+def test_part_of_a_deployed_lag_cannot_be_removed(cs1a, model):
+    model['vlans'][1000]['tagged'] = ['1/1/2', '1/1/7']
+    assert config_removals(cs1a, model) == []
+    [finding] = config_drift(cs1a, model, remove=['vlan_ports'])
+    assert (finding['rule'], finding['fixable']) == ('vlan_ports_extra', False)
+    assert finding['message'] == ('VLAN 1000 has extra tagged port(s) 1/1/8 (part of deployed LAG MCT_lag1; '
+                                  'list all of its ports or none)')
+
+
+def test_ports_of_an_undeployed_lag_are_removed_one_by_one(cs1a, model):
+    running = cs1a.replace(' primary-port 1/1/7\n deploy\n', ' primary-port 1/1/7\n')
+    model['vlans'][1000]['tagged'] = ['1/1/2']
+    assert config_removals(running, model) == ['vlan 1000', ' no tagged ethe 1/1/7 to 1/1/8']
+
+
+def test_keep_alive_changes_need_the_cluster_undeployed(cs1a, model):
+    model['vlans'][3001]['tagged'] = ['1/1/40']
+    assert clusters_to_undeploy(cs1a, model, remove=['vlan_ports']) == [{'name': 'ALB-CORE', 'id': 4000}]
+    # Adding a port alone needs it too.
+    model['vlans'][3001]['tagged'] = ['1/1/7', '1/1/8', '1/1/40']
+    assert clusters_to_undeploy(cs1a, model) == [{'name': 'ALB-CORE', 'id': 4000}]
+
+
+@pytest.mark.parametrize('edit, kwargs', [
+    (lambda m: None, {'remove': ['vlan_ports']}),
+    (lambda m: m['vlans'][1000].update(tagged=['1/1/2', '1/1/7', '1/1/8', '1/1/9']), {'remove': ['vlan_ports']}),
+    (lambda m: m['vlans'][3001].update(tagged=[]), {}),
+    (lambda m: m['vlans'][3001].update(tagged=[]), {'remove': ['vlan_ports'], 'protected_vlans': [3001]}),
+])
+def test_no_undeploy_without_keep_alive_changes(cs1a, model, edit, kwargs):
+    edit(model)
+    assert clusters_to_undeploy(cs1a, model, **kwargs) == []
+
+
+def test_no_undeploy_for_an_undeployed_cluster(cs1a, model):
+    running = cs1a.replace(' peer 10.0.1.3 rbridge-id 3 icl ALB-CORE-MCT\n deploy\n',
+                           ' peer 10.0.1.3 rbridge-id 3 icl ALB-CORE-MCT\n')
+    assert running != cs1a
+    model['vlans'][3001]['tagged'] = ['1/1/40']
+    assert clusters_to_undeploy(running, model, remove=['vlan_ports']) == []

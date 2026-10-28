@@ -29,6 +29,9 @@ releases:
           not list.
         name: fastiron_config_removals
         namespace: null
+      - description: List the MCT clusters to undeploy around changes to a model.
+        name: fastiron_config_undeploy
+        namespace: null
       - description: Check a FastIron switch's MCT configuration for mistakes.
         name: fastiron_mct_audit
         namespace: null

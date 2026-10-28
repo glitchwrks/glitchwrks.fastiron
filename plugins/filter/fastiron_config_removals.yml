@@ -12,6 +12,11 @@ DOCUMENTATION:
       model does not list for them. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
     - Only ports on VLANs in the model are removed. VLANs, and anything else, are never removed.
     - A port removed from its last untagged VLAN goes back to the default VLAN.
+    - FastIron changes the VLANs of a deployed LAG through its primary port, so removing all of a deployed
+      LAG's ports names only its primary port. Removing only some of them is not possible, and is left out;
+      P(glitchwrks.fastiron.fastiron_config_drift#filter) reports it.
+    - FastIron refuses changes to a deployed cluster's keep-alive VLAN.
+      P(glitchwrks.fastiron.fastiron_config_undeploy#filter) lists the clusters to undeploy around them.
     - Protected VLANs are left alone. Each cluster's session VLAN is always protected, since removing it
       from the ICL breaks the cluster's control link.
     - The lines are nested by indenting one space. Send them after the lines from

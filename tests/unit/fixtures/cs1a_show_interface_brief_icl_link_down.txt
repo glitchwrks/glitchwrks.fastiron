@@ -1,0 +1,4 @@
+
+Port    Link    State   Dupl Speed Trunk Tag Pvid Pri MAC             Name
+1/1/7   Up      Forward Full 10G   2     Yes N/A  0   0012.3456.789a
+1/1/8   Down    None    None None  2     Yes N/A  0   0012.3456.789a
