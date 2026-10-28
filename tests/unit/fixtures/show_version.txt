@@ -1,0 +1,30 @@
+  Copyright (c) 1996-2014 Brocade Communications Systems, Inc. All rights reserved.
+    UNIT 1: compiled on Apr 23 2020 at 10:46:20 labeled as ICXR08030u
+                (10643143 bytes) from Primary ICXR08030u.bin
+        SW: Version 08.0.30uT323
+  Boot-Monitor Image size = 524288, Version:10.1.01T320 (fxz10101)
+  HW: Stackable ICX6650-64
+==========================================================================
+UNIT 1: SL 1: ICX6650-64 56-port Management Module
+         Serial  #: XXXXXXXXXXX
+         License: ICX6650_L3_SOFT_PACKAG   (LID: XXXXXXXXXXX)
+         P-ENGINE  0: type EC02, rev 01
+==========================================================================
+UNIT 1: SL 2: ICX6650-64 4-port 160G Module
+==========================================================================
+UNIT 1: SL 3: ICX6650-64 8-port 80G Module
+==========================================================================
+  800 MHz Power PC processor 8544E (version 0021/0022) 400 MHz bus
+65536 KB flash memory
+ 1024 MB DRAM
+STACKID 1  system uptime is 6 days 5 hours 39 minutes 40 seconds
+==========================================================================
+HARDWARE INFORMATION
+UNIT NAME   : ICX6650-64
+HW REVISION       : 2 (PRODUCTION)
+Board ID  : 4(ICX6650)
+CPLD INFORMATION
+CPLD code is RD revision
+CPLD CODE REVISION = 6
+==========================================================================
+The system : started=warm start  reloaded=by "reload"

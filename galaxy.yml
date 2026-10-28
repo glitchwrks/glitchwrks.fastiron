@@ -1,0 +1,31 @@
+namespace: glitchwrks
+name: fastiron
+version: 0.1.0
+readme: README.md
+authors:
+  - Jonathan Chapman <glitch@glitchwrks.com>
+description: >-
+  Ansible support for Brocade / Ruckus FastIron switches, including the older ICX 6000 series
+  (FastIron 08.0.30): network_cli connection plugins, and parsing and auditing of
+  configuration, including Multi-Chassis Trunking (MCT). Maintained by Glitch Works, LLC.
+license:
+  - GPL-3.0-or-later
+tags:
+  - networking
+  - brocade
+  - ruckus
+  - fastiron
+  - icx
+dependencies:
+  ansible.netcommon: ">=5.0.0"
+repository: https://github.com/glitchwrks/glitchwrks.fastiron
+documentation: https://github.com/glitchwrks/glitchwrks.fastiron
+homepage: https://github.com/glitchwrks/glitchwrks.fastiron
+issues: https://github.com/glitchwrks/glitchwrks.fastiron/issues
+build_ignore:
+  - .github
+  - .gitignore
+  - tests/output
+  - changelogs/.plugin-cache.yaml
+  - '*.tar.gz'
+  - dist

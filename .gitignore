@@ -1,0 +1,34 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Collection artifacts from `ansible-galaxy collection build`
+/*.tar.gz
+
+# ansible-test output
+tests/output/
+
+# Retry files from failed playbook runs
+*.retry
+
+# Python tooling
+.venv/
+venv/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Editors and OS files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# antsibull-changelog plugin cache
+changelogs/.plugin-cache.yaml
+
+# Release builds
+/dist/

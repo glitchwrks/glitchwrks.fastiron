@@ -1,0 +1,55 @@
+# Copyright: (c) 2026, Glitch Works, LLC
+# GNU General Public License v3.0+ (see LICENSE or https://www.gnu.org/licenses/gpl-3.0.txt)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+DOCUMENTATION:
+  name: fastiron_mct_compare
+  author: Jonathan Chapman (@glitchwrks)
+  version_added: 0.1.0
+  short_description: Check that two FastIron MCT peers agree
+  description:
+    - Compares the MCT clusters of two peer switches, for example cluster IDs, session and keep-alive
+      VLANs, rbridge IDs, peer addresses, and the clients and client VLANs each side defines.
+  positional: peer_config
+  options:
+    _input:
+      description: Configuration text, or a configuration parsed by
+        P(glitchwrks.fastiron.fastiron_parse_config#filter), of one switch.
+      type: raw
+      required: true
+    peer_config:
+      description: Configuration of its MCT peer, in the same forms as O(_input).
+      type: raw
+      required: true
+    name:
+      description: Name of the first switch, used in finding messages.
+      type: str
+      default: this switch
+    peer_name:
+      description: Name of the peer, used in finding messages.
+      type: str
+      default: its peer
+
+EXAMPLES: |
+  - name: Get the running configuration of both peers
+    ansible.netcommon.cli_command:
+      command: show running-config
+    register: running
+
+  - name: Compare each switch with its peer
+    vars:
+      peer: "{{ mct_peer }}"
+      findings: >-
+        {{ running.stdout | glitchwrks.fastiron.fastiron_mct_compare(
+             hostvars[peer].running.stdout, name=inventory_hostname, peer_name=peer) }}
+    ansible.builtin.assert:
+      that: findings | length == 0
+      fail_msg: "{{ findings | map(attribute='message') }}"
+
+RETURN:
+  _value:
+    description:
+      - A list of findings, empty when the peers agree.
+      - Each finding has C(severity), C(rule), C(cluster) and C(message).
+    type: list
+    elements: dict

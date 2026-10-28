@@ -1,0 +1,191 @@
+# glitchwrks.fastiron
+
+Ansible support for Brocade / Ruckus FastIron switches over the CLI, with checks for
+Multi-Chassis Trunking (MCT) configuration mistakes before a failover exposes them.
+
+Maintained by [Glitch Works, LLC](https://www.glitchwrks.com/). Developed and tested against
+ICX 6650 switches running FastIron 08.0.30. Other FastIron switches and releases with the same
+CLI are likely to work, but have not been tested.
+
+## Contents
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `glitchwrks.fastiron.fastiron` | cliconf | Reads and changes configuration for `ansible.netcommon.cli_command` and `ansible.netcommon.cli_config` |
+| `glitchwrks.fastiron.fastiron` | terminal | Recognizes FastIron prompts and errors, turns off paging, and enters privileged EXEC mode |
+| `glitchwrks.fastiron.fastiron_parse_config` | filter | Parses a running configuration into VLANs, LAGs, VE addresses and MCT clusters |
+| `glitchwrks.fastiron.fastiron_mct_audit` | filter | Checks one switch's MCT clusters against the Ruckus MCT design rules |
+| `glitchwrks.fastiron.fastiron_mct_compare` | filter | Checks that two MCT peers agree |
+
+Full documentation for each is available with `ansible-doc`, for example
+`ansible-doc -t filter glitchwrks.fastiron.fastiron_mct_audit`.
+
+## Requirements
+
+- ansible-core 2.19 or later on the controller
+- [`ansible.netcommon`](https://galaxy.ansible.com/ui/repo/published/ansible/netcommon/) 5.0.0 or
+  later, installed automatically as a dependency
+- [`ansible-pylibssh`](https://pypi.org/project/ansible-pylibssh/) on the controller, for the
+  older SSH algorithms these switches need (see below)
+
+## Installation
+
+```sh
+ansible-galaxy collection install glitchwrks.fastiron
+pip install ansible-pylibssh
+```
+
+Or straight from GitHub:
+
+```sh
+ansible-galaxy collection install git+https://github.com/glitchwrks/glitchwrks.fastiron.git
+```
+
+## Connecting to the switches
+
+FastIron 08.0.30 only offers SSH algorithms that current SSH clients turn off by default:
+the `diffie-hellman-group1-sha1` key exchange, `ssh-rsa` host keys and the `aes256-cbc` cipher.
+`ansible.netcommon.network_cli` can use them through libssh, but needs some of them set in two
+different places.
+
+The key exchange and host key algorithms are set as inventory variables. The cipher has no
+`network_cli` option, but libssh reads the controller user's `~/.ssh/config`, so add a `Host`
+block for the switches there:
+
+```
+# ~/.ssh/config on the Ansible controller
+Host cs1a.example.net cs1b.example.net
+    KexAlgorithms +diffie-hellman-group1-sha1
+    HostKeyAlgorithms +ssh-rsa
+    Ciphers +aes256-cbc
+```
+
+These algorithms are weak. Only reach the switches' management interfaces over a trusted
+network or a VPN.
+
+Then set the connection up in the inventory:
+
+```yaml
+# group_vars/fastiron.yml
+ansible_connection: ansible.netcommon.network_cli
+ansible_network_os: glitchwrks.fastiron.fastiron
+ansible_network_cli_ssh_type: libssh
+ansible_libssh_key_exchange_algorithms: +diffie-hellman-group1-sha1
+ansible_libssh_hostkeys: +ssh-rsa
+ansible_become: true
+ansible_become_method: ansible.netcommon.enable
+ansible_become_password: "{{ vault_enable_password }}"
+```
+
+Sessions log in to user EXEC mode (`>`). With `ansible_become`, the terminal plugin runs `enable`
+and answers the password prompt. When no enable password is set on the switch, `enable` succeeds
+without one.
+
+## Usage
+
+### Running commands
+
+```yaml
+- name: Show the MCT cluster state
+  ansible.netcommon.cli_command:
+    command: show cluster
+```
+
+`write memory` returns only once the copy to flash has finished, including its
+`Flash to Flash Done.` line.
+
+### Backing up and changing configuration
+
+```yaml
+- name: Back up the running configuration
+  ansible.netcommon.cli_config:
+    backup: true
+    backup_options:
+      dir_path: "{{ playbook_dir }}/backups"
+      filename: "{{ inventory_hostname }}.cfg"
+
+- name: Make sure a VLAN exists on the ICL
+  ansible.netcommon.cli_config:
+    config: |
+      vlan 2000 name Lab by port
+       tagged ethe 1/1/7 to 1/1/8
+```
+
+The running configuration can contain secrets, such as SNMP communities, and password hashes when
+the switch is set to display them. Encrypt backups, for example with `ansible-vault`, before
+committing them anywhere.
+
+`cli_config` compares the candidate with the running configuration on the controller and only
+sends the lines that are missing, stepping in and out of configuration sub-modes as needed. In
+check mode it reports what would change without changing anything. Write the candidate the way
+it appears in `show running-config`, nested blocks indented by one space, so that lines
+already present are recognized. Replacing the whole configuration is not supported. Changes are
+not saved to flash until `write memory`.
+
+### Checking MCT configuration
+
+```yaml
+- name: Get the running configuration
+  ansible.netcommon.cli_command:
+    command: show running-config
+  register: running
+
+- name: Check this switch's MCT configuration
+  vars:
+    findings: "{{ running.stdout | glitchwrks.fastiron.fastiron_mct_audit }}"
+  ansible.builtin.assert:
+    that: findings | selectattr('severity', '==', 'error') | list | length == 0
+    fail_msg: "{{ findings | map(attribute='message') }}"
+
+- name: Check that the MCT peers agree
+  vars:
+    findings: >-
+      {{ running.stdout | glitchwrks.fastiron.fastiron_mct_compare(
+           hostvars[mct_peer].running.stdout, name=inventory_hostname, peer_name=mct_peer) }}
+  ansible.builtin.assert:
+    that: findings | length == 0
+    fail_msg: "{{ findings | map(attribute='message') }}"
+```
+
+## Development
+
+Run the tests with [`ansible-test`](https://docs.ansible.com/ansible-core/devel/dev_guide/testing.html)
+from a checkout at `ansible_collections/glitchwrks/fastiron`, with `ansible.netcommon` and
+`ansible.utils` installed alongside:
+
+```sh
+ansible-test sanity --docker default
+ansible-test units --docker default
+```
+
+User-facing changes need a changelog fragment in `changelogs/fragments/`. See the
+[antsibull-changelog documentation](https://ansible.readthedocs.io/projects/antsibull-changelog/changelogs/).
+
+## Releasing
+
+Releases are published to Ansible Galaxy by the `release` workflow when a version tag is pushed.
+
+1. Make sure every user-facing change since the last release has a fragment in
+   `changelogs/fragments/`.
+2. Set the new version in `galaxy.yml`, following [semantic versioning](https://semver.org/).
+3. Generate the release notes, which updates `CHANGELOG.md` and removes the fragments:
+   ```sh
+   antsibull-changelog release
+   ```
+4. Commit, and merge to `master` once CI passes.
+5. Tag the merged commit with the version, without a `v` prefix, and push the tag:
+   ```sh
+   git tag 0.2.0
+   git push origin 0.2.0
+   ```
+
+The workflow checks that the tag matches `galaxy.yml`, builds the collection, publishes it to
+Galaxy and creates a GitHub release with the built archive attached. Publishing needs a Galaxy API
+token for the `glitchwrks` namespace, stored as the `GALAXY_API_KEY` repository secret.
+
+A version can only be published to Galaxy once. If a release goes wrong, fix it and release the
+next patch version.
+
+## License
+
+GNU General Public License v3.0 or later. See [LICENSE](LICENSE).
