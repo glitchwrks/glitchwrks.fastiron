@@ -47,7 +47,8 @@ attributes:
     platforms: fastiron
 notes:
   - Requires the P(ansible.netcommon.network_cli#connection) connection with C(ansible_network_os)
-    set to C(glitchwrks.fastiron.fastiron), and SCP enabled on the switch, which is the default.
+    set to C(glitchwrks.fastiron.fastiron) and C(ansible_network_cli_ssh_type) set to C(libssh), and
+    SCP enabled on the switch, which is the default.
   - FastIron allows one channel per SSH connection, which the CLI session uses. Uploads open a
     second SSH connection with the same credentials and options, closed again afterwards, so it
     counts against the switch's limit of concurrent SSH sessions while it is open.

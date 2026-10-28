@@ -13,6 +13,7 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_ssh_k
     FastIronKeyError,
     parse_client_pub_keys,
     parse_openssh_key,
+    scp_send,
     to_rfc4716,
 )
 
@@ -83,3 +84,61 @@ def test_parses_output_captured_from_an_icx6650():
 
 def test_no_keys():
     assert parse_client_pub_keys('') == []
+
+
+class ScriptedChannel:
+    """A channel that replies to each SCP step from a script."""
+
+    def __init__(self, replies):
+        self.replies = list(replies)
+        self.pending = []
+        self.command = None
+        self.written = b''
+        self.eof_sent = False
+
+    def request_exec(self, command):
+        self.command = command
+        self._next()
+
+    def write(self, data):
+        self.written += data
+        if data == b'\0' or data.endswith(b'\n'):
+            self._next()
+        return len(data)
+
+    def _next(self):
+        if self.replies:
+            self.pending.append(self.replies.pop(0))
+
+    def poll(self, timeout=-1):
+        return len(self.pending[0]) if self.pending else 0
+
+    @property
+    def is_eof(self):
+        return not self.pending
+
+    def recv(self, size=1024):
+        return self.pending.pop(0)
+
+    def send_eof(self):
+        self.eof_sent = True
+
+
+def test_scp_send_speaks_the_protocol_unquoted():
+    channel = ScriptedChannel([b'\0', b'\0', b'\0'])
+    scp_send(channel, 'sshPubKey', b'keys\n')
+    # libssh would send "scp -t 'sshPubKey'", which FastIron refuses.
+    assert channel.command == 'scp -t sshPubKey'
+    assert channel.written == b'C0644 5 sshPubKey\nkeys\n\0'
+    assert channel.eof_sent
+
+
+@pytest.mark.parametrize('replies, message', [
+    ([b'\0', b'\x01Wrong file name is specified\n'], 'refused the key file: Wrong file name is specified'),
+    ([b'\x02fatal\n'], 'refused the key file: fatal'),
+    ([b'\0', b'garbage'], 'unexpected reply'),
+    ([b'\0'], 'closed the SCP connection'),
+])
+def test_scp_send_reports_what_the_switch_says(replies, message):
+    with pytest.raises(FastIronKeyError, match=message):
+        scp_send(ScriptedChannel(replies), 'sshPubKey', b'keys\n', timeout=1)
