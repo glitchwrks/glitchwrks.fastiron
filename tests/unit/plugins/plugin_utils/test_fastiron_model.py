@@ -364,3 +364,133 @@ def test_system_max_validation(model, system_max):
     model['system_max'] = system_max
     with pytest.raises(FastIronConfigError):
         normalize_model(model)
+
+
+# Ethernet interface settings
+
+INTERFACES = '''Current configuration:
+!
+ver 08.0.30uT7f3
+!
+vlan 1 name DEFAULT-VLAN by port
+!
+vlan 11 name Wireless by port
+ tagged ethe 1/3/3
+!
+interface ethernet 1/1/1
+ port-name "Shentel handoff"
+!
+interface ethernet 1/1/2
+ port-name em0.rtr1.bee
+!
+interface ethernet 1/1/45
+ port-name ap1.bee
+ inline power priority 1
+!
+interface ethernet 1/3/2
+ speed-duplex 10G-full
+!
+interface ethernet 1/3/3
+ port-name ix0.gw2.bee
+ dual-mode
+ speed-duplex 10G-full
+!
+interface ethernet 1/3/4
+ dual-mode 100
+!
+end
+'''
+
+
+def test_parse_interfaces():
+    interfaces = parse_config(INTERFACES)['interfaces']
+    assert interfaces['1/1/1'] == {'name': 'Shentel handoff', 'speed_duplex': None, 'dual_mode': False}
+    assert interfaces['1/1/45'] == {'name': 'ap1.bee', 'speed_duplex': None, 'dual_mode': False}
+    assert interfaces['1/3/2'] == {'name': None, 'speed_duplex': '10G-full', 'dual_mode': False}
+    assert interfaces['1/3/3'] == {'name': 'ix0.gw2.bee', 'speed_duplex': '10G-full', 'dual_mode': True}
+    assert interfaces['1/3/4']['dual_mode'] == 100
+    assert '1/1/3' not in interfaces
+
+
+def test_interfaces_match_themselves():
+    model = {'interfaces': parse_config(INTERFACES)['interfaces']}
+    assert config_drift(INTERFACES, model) == []
+    assert config_commands(INTERFACES, model) == []
+
+
+def test_interface_settings_left_out_are_not_compared():
+    model = {'interfaces': {'1/3/3': {'name': 'ix0.gw2.bee'}, '1/1/9': {}}}
+    assert config_drift(INTERFACES, model) == []
+    assert config_commands(INTERFACES, model) == []
+
+
+@pytest.mark.parametrize('interface, expected, commands', [
+    ({'1/1/2': {'name': 'aggr0 rtr1.bee'}}, [('interface_name', True)],
+     ['interface ethernet 1/1/2', ' port-name "aggr0 rtr1.bee"']),
+    ({'1/1/3': {'name': 'em0.rtr1.bee'}}, [('interface_name', True)],
+     ['interface ethernet 1/1/3', ' port-name em0.rtr1.bee']),
+    ({'1/3/5': {'speed_duplex': '10G-full'}}, [('interface_speed_duplex', True)],
+     ['interface ethernet 1/3/5', ' speed-duplex 10G-full']),
+    ({'1/3/2': {'speed_duplex': '1000-full'}}, [('interface_speed_duplex', True)],
+     ['interface ethernet 1/3/2', ' speed-duplex 1000-full']),
+    ({'1/3/2': {'dual_mode': True}}, [('interface_dual_mode', True)], ['interface ethernet 1/3/2', ' dual-mode']),
+    ({'1/3/2': {'dual_mode': 100}}, [('interface_dual_mode', True)], ['interface ethernet 1/3/2', ' dual-mode 100']),
+    # Turning dual-mode off or moving it to another VLAN is done by hand.
+    ({'1/3/3': {'dual_mode': False}}, [('interface_dual_mode', False)], []),
+    ({'1/3/4': {'dual_mode': True}}, [('interface_dual_mode', False)], []),
+])
+def test_interface_drift_and_commands(interface, expected, commands):
+    model = {'interfaces': interface}
+    findings = config_drift(INTERFACES, model)
+    assert rules(findings) == expected
+    assert config_commands(INTERFACES, model) == commands
+
+
+def test_interface_commands_are_ordered_around_lags_and_vlans():
+    # A LAG's ports must match before it is deployed, and dual-mode needs the
+    # port tagged in a VLAN first.
+    model = {
+        'interfaces': {'1/3/5': {'name': 'ix0.gw2.bee', 'speed_duplex': '10G-full', 'dual_mode': True},
+                       '1/3/6': {'name': 'ix1.gw2.bee', 'speed_duplex': '10G-full'}},
+        'lags': {'gw2': {'type': 'dynamic', 'id': 12, 'ports': ['1/3/5', '1/3/6']}},
+        'vlans': {11: {'name': 'Wireless', 'tagged': ['1/3/3', '1/3/5', '1/3/6']}},
+    }
+    commands = config_commands(INTERFACES, model)
+    assert commands == [
+        'interface ethernet 1/3/5', ' port-name ix0.gw2.bee', ' speed-duplex 10G-full',
+        'interface ethernet 1/3/6', ' port-name ix1.gw2.bee', ' speed-duplex 10G-full',
+        'lag "gw2" dynamic id 12', ' ports ethernet 1/3/5 to 1/3/6', ' primary-port 1/3/5', ' deploy',
+        'vlan 11', ' tagged ethe 1/3/5 to 1/3/6',
+        'interface ethernet 1/3/5', ' dual-mode',
+    ]
+
+
+def test_interface_commands_read_back_as_the_model():
+    model = {'interfaces': {'1/1/2': {'name': 'two words', 'speed_duplex': '1000-full', 'dual_mode': 7}}}
+    commands = config_commands(EMPTY, model)
+    rebuilt = 'Current configuration:\n!\n%s\nend\n' % '\n'.join(commands)
+    assert config_drift(rebuilt, model) == []
+
+
+@pytest.mark.parametrize('interfaces, message', [
+    ({'1/1/1 to 1/1/2': {}}, 'single ports'),
+    ({'ve 1': {}}, 'single ports'),
+    ({'1/1/1': {'mtu': 9000}}, 'unknown keys: mtu'),
+    ({'1/1/1': {'name': ''}}, 'name must be text'),
+    ({'1/1/1': {'name': 'say "hi"'}}, 'name must be text'),
+    ({'1/1/1': {'speed_duplex': '10G full'}}, 'speed_duplex must be a word'),
+    ({'1/1/1': {'dual_mode': 5000}}, 'dual_mode must be true, false or a VLAN id'),
+    ({'1/1/1': {'dual_mode': 'yes'}}, 'dual_mode must be a number'),
+])
+def test_invalid_interfaces(interfaces, message):
+    with pytest.raises(FastIronConfigError, match=message):
+        normalize_model({'interfaces': interfaces})
+
+
+def test_dual_mode_belongs_on_a_lags_primary_port():
+    model = {'interfaces': {'1/3/6': {'dual_mode': True}},
+             'lags': {'gw2': {'type': 'dynamic', 'id': 12, 'ports': ['1/3/5', '1/3/6']}}}
+    with pytest.raises(FastIronConfigError, match='set dual_mode on its primary port 1/3/5'):
+        normalize_model(model)
+    model['interfaces'] = {'1/3/5': {'dual_mode': True}, '1/3/6': {'name': 'ix1.gw2.bee'}}
+    normalize_model(model)

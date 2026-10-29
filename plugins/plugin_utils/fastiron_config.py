@@ -76,14 +76,20 @@ def parse_config(text):
     """Parse a FastIron running configuration into a dictionary.
 
     Covers the parts needed to audit MCT: hostname, VLANs, LAGs, VE interface
-    addresses and clusters, plus system-max settings. Anything else is ignored.
+    addresses and clusters, plus system-max settings and the port name,
+    speed-duplex and dual-mode settings of Ethernet interfaces. Anything else
+    is ignored.
 
     system_max maps the system-max parameters the configuration sets, such as
     vlan, to their values. A parameter left at its default is not listed: the
     running configuration doesn't show defaults.
+
+    interfaces maps each port with an "interface ethernet" block to its name
+    (port-name, or None), speed_duplex (or None) and dual_mode: False, True
+    for dual-mode on the default VLAN, or the VLAN id given to dual-mode.
     """
     result = {'hostname': None, 'version': None, 'system_max': {}, 'vlans': {}, 'lags': {}, 've_addresses': {},
-              'clusters': {}}
+              'clusters': {}, 'interfaces': {}}
 
     for head, children in _blocks(text):
         words = head.split()
@@ -117,6 +123,10 @@ def parse_config(text):
                 elif cw[0] == 'deploy':
                     lag['deployed'] = True
             result['lags'][m.group(1) if m else words[1].strip('"')] = lag
+        elif words[0] == 'interface' and len(words) > 2 and words[1].startswith('ethe'):
+            for port in parse_ports(words[2:]):
+                _parse_interface(result['interfaces'].setdefault(
+                    port, {'name': None, 'speed_duplex': None, 'dual_mode': False}), children)
         elif words[0] == 'interface' and len(words) > 2 and words[1] == 've':
             for child in children:
                 cw = child.split()
@@ -126,6 +136,19 @@ def parse_config(text):
         elif words[0] == 'cluster' and len(words) > 1:
             result['clusters'][words[1]] = _parse_cluster(words, children)
     return result
+
+
+def _parse_interface(interface, children):
+    """Add the settings in an interface block to interface. A port's settings
+    may be split over several blocks, as in a list of commands."""
+    for child in children:
+        cw = child.split()
+        if cw[0] == 'port-name' and len(cw) > 1:
+            interface['name'] = child.split(None, 1)[1].strip().strip('"')
+        elif cw[0] == 'speed-duplex' and len(cw) > 1:
+            interface['speed_duplex'] = cw[1]
+        elif cw[0] == 'dual-mode':
+            interface['dual_mode'] = _int(cw[1]) if len(cw) > 1 and _int(cw[1]) is not None else True
 
 
 def _parse_cluster(words, children):
