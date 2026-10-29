@@ -76,9 +76,14 @@ def parse_config(text):
     """Parse a FastIron running configuration into a dictionary.
 
     Covers the parts needed to audit MCT: hostname, VLANs, LAGs, VE interface
-    addresses and clusters. Anything else is ignored.
+    addresses and clusters, plus system-max settings. Anything else is ignored.
+
+    system_max maps the system-max parameters the configuration sets, such as
+    vlan, to their values. A parameter left at its default is not listed: the
+    running configuration doesn't show defaults.
     """
-    result = {'hostname': None, 'version': None, 'vlans': {}, 'lags': {}, 've_addresses': {}, 'clusters': {}}
+    result = {'hostname': None, 'version': None, 'system_max': {}, 'vlans': {}, 'lags': {}, 've_addresses': {},
+              'clusters': {}}
 
     for head, children in _blocks(text):
         words = head.split()
@@ -86,6 +91,8 @@ def parse_config(text):
             result['hostname'] = words[1]
         elif words[0] == 'ver' and len(words) > 1:
             result['version'] = words[1]
+        elif words[0] == 'system-max' and len(words) > 2 and _int(words[2]) is not None:
+            result['system_max'][words[1]] = int(words[2])
         elif words[0] == 'vlan' and len(words) > 1 and _int(words[1]) is not None:
             vlan = {'name': None, 'tagged': [], 'untagged': [], 'router_interface': None}
             if 'name' in words:

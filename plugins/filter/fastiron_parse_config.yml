@@ -9,7 +9,7 @@ DOCUMENTATION:
   short_description: Parse a FastIron running configuration
   description:
     - Parses the output of C(show running-config) from a FastIron switch into the hostname,
-      software version, VLANs, LAGs, VE addresses and MCT clusters it defines.
+      software version, system-max settings, VLANs, LAGs, VE addresses and MCT clusters it defines.
     - Port ranges such as C(ethe 1/1/7 to 1/1/8) are expanded to individual ports.
     - A configuration that was already parsed is returned unchanged.
   options:
@@ -34,6 +34,9 @@ RETURN:
       - The parsed configuration.
       - Keys C(vlans) and C(ve_addresses) are keyed by VLAN or VE number, C(lags) and
         C(clusters) by name.
+      - C(system_max) maps the system-max parameters the configuration sets, such as C(vlan), to their
+        values. Parameters left at their defaults are not listed, because the running configuration does not
+        show them.
       - Each cluster has C(id), C(rbridge_id), C(session_vlan), C(keep_alive_vlan), C(icl),
         C(peers), C(deployed) and C(clients).
     type: dict

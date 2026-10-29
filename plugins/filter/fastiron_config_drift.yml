@@ -8,10 +8,13 @@ DOCUMENTATION:
   version_added: 0.1.0
   short_description: Compare a FastIron running configuration with a model
   description:
-    - Reports how a switch's running configuration differs from a model of its VLANs, LAGs, VE interface
-      addresses and MCT clusters. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
+    - Reports how a switch's running configuration differs from a model of its system-max settings, VLANs,
+      LAGs, VE interface addresses and MCT clusters. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
     - Only the sections the model has are compared. Within them, VLANs, LAGs, clusters and cluster clients
-      the switch has but the model does not are reported as warnings.
+      the switch has but the model does not are reported as warnings, as are system-max parameters the
+      switch sets but the model does not.
+    - System-max settings are compared with the running configuration, which shows the configured value
+      even before the reload that puts it into effect.
     - Ports are compared as sets, so their order and how ranges are written do not matter. Addresses are
       compared whether written with a prefix length or a netmask.
   positional: model
