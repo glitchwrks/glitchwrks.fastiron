@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 from ansible.module_utils.common.text.converters import to_text
@@ -31,6 +32,22 @@ KEY_FILE = 'sshPubKey'
 RETRY_SECONDS = 120
 RETRY_INTERVAL = 2
 _REFUSED = 'Socket error: disconnected'
+
+# pylibssh logs libssh's messages to this logger. In a worker process nothing
+# handles it, so Python prints warnings, such as each refused connection, to
+# stderr, and Ansible warns about that.
+PYLIBSSH_LOGGER = 'ansible-pylibssh'
+
+
+class _DisplayHandler(logging.Handler):
+    """Shows log records at -vvv instead."""
+
+    def __init__(self, display):
+        super().__init__()
+        self.display = display
+
+    def emit(self, record):
+        self.display.vvv('libssh: %s' % record.getMessage())
 
 
 class ActionModule(ActionBase):
@@ -112,6 +129,10 @@ class ActionModule(ActionBase):
         if self._connection.ssh_type != 'libssh':
             raise FastIronKeyError('uploading keys requires ansible_network_cli_ssh_type set to libssh')
         ssh = self._connection.ssh_type_conn
+        logger = logging.getLogger(PYLIBSSH_LOGGER)
+        handler = _DisplayHandler(self._display)
+        logger.addHandler(handler)
+        propagate, logger.propagate = logger.propagate, False
         try:
             self._connect(ssh)
             channel = ssh.ssh.new_channel()
@@ -125,6 +146,8 @@ class ActionModule(ActionBase):
             # A connection that failed has no session to close.
             if hasattr(ssh, 'ssh'):
                 ssh.close()
+            logger.removeHandler(handler)
+            logger.propagate = propagate
 
     def _connect(self, ssh):
         """Connect, retrying while the switch refuses new connections."""

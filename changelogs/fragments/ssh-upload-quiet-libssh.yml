@@ -1,0 +1,5 @@
+---
+bugfixes:
+  - "fastiron_ssh_keys - show libssh's messages while connecting for the upload at ``-vvv``, instead of letting
+    them reach stderr. Each connection a switch refused printed libssh warnings there, and Ansible reported
+    that the worker process ``errantly sent data directly to stderr``."
