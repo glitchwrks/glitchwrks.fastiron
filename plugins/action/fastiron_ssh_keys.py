@@ -24,10 +24,11 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_ssh_k
 KEY_FILE = 'sshPubKey'
 
 # Some FastIron builds (ICX 6610, 08.0.30uT7f3) refuse a new SSH connection for
-# about 13 seconds after the last one, by dropping it during key exchange. The
-# upload connection follows the persistent connection closely, so it is retried
-# for a while when that happens.
-RETRY_SECONDS = 30
+# a while after the last one, by dropping it during key exchange: measured at
+# 13 to 45 seconds, longer after failed logins. The upload connection follows
+# the persistent connection closely, so it is retried for a while when that
+# happens.
+RETRY_SECONDS = 120
 RETRY_INTERVAL = 2
 _REFUSED = 'Socket error: disconnected'
 

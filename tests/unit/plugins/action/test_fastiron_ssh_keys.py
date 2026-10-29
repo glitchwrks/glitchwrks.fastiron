@@ -179,8 +179,8 @@ def test_upload_connection_gives_up_after_the_retry_window(switch, clock):
     switch.ssh._connect.side_effect = AnsibleError('ssh connect failed: Socket error: disconnected')
     with pytest.raises(AnsibleError, match='disconnected'):
         run(switch, [RSA])
-    assert clock[0] <= 30
-    assert switch.ssh._connect.call_count == 16  # at 0, 2, ... 30 seconds
+    assert clock[0] <= 120
+    assert switch.ssh._connect.call_count == 61  # at 0, 2, ... 120 seconds
 
 
 def test_other_connection_failures_are_not_retried(switch, clock):

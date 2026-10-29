@@ -1,0 +1,4 @@
+---
+bugfixes:
+  - "fastiron_ssh_keys - retry the upload connection for up to 120 seconds instead of 30. An ICX 6610 running
+    08.0.30uT7f3 was measured refusing new SSH connections for up to 45 seconds, longer than first measured."
