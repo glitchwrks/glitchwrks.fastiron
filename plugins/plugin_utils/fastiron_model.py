@@ -4,14 +4,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Compare FastIron running configurations with a declared model.
 
-A model describes VLANs, LAGs, VE interface addresses, MCT clusters and
-system-max settings in the same shape parse_config() returns, so a model can be bootstrapped from a
+A model describes VLANs, LAGs, VE interface addresses, MCT clusters,
+system-max settings and Ethernet interface settings in the same shape parse_config() returns, so a model can be bootstrapped from a
 parsed running configuration, and the MCT checks work on models too. Only the
 sections a model declares are compared; the others are left alone.
 
 Changes are additive: commands are generated only for what can be added
 safely (missing VLANs, ports, addresses, LAGs, clusters and clients, VLAN
-names, deploying), plus system-max settings, which only take effect once the
+names, deploying, port names, speed-duplex, dual-mode where none is set),
+plus system-max settings, which only take effect once the
 configuration is saved and the switch reloaded. Anything that needs removing something, or changing a LAG
 or cluster in place, is reported as drift to fix by hand.
 
@@ -32,12 +33,13 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
     parse_ports,
 )
 
-SECTIONS = ('system_max', 'vlans', 'lags', 've_addresses', 'clusters')
+SECTIONS = ('system_max', 'interfaces', 'vlans', 'lags', 've_addresses', 'clusters')
 # What config_removals() can remove, when asked to. Nothing is removed by
 # default.
 REMOVABLE = ('vlan_ports',)
 LAG_TYPES = ('static', 'dynamic')
 _SYSTEM_MAX_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
+_SPEED_DUPLEX_RE = re.compile(r'^[0-9A-Za-z][0-9A-Za-z-]*$')
 
 
 # Validating a model
@@ -97,6 +99,32 @@ def _address(value, what):
         raise FastIronConfigError('%s is not an address with a prefix length or netmask: %r' % (what, value))
 
 
+def _interface(interface, what):
+    """An interface's settings. Settings the model leaves out, or sets to None
+    (as a parsed configuration does for what it doesn't set), are not compared,
+    and stay unset here."""
+    result = {}
+    interface = {key: value for key, value in interface.items() if value is not None}
+    if 'name' in interface:
+        name = interface['name']
+        if not isinstance(name, str) or not name or '"' in name:
+            raise FastIronConfigError('%s name must be text without double quotes, got %r' % (what, name))
+        result['name'] = name
+    if 'speed_duplex' in interface:
+        speed = interface['speed_duplex']
+        if not isinstance(speed, str) or not _SPEED_DUPLEX_RE.match(speed):
+            raise FastIronConfigError('%s speed_duplex must be a word such as 10G-full, got %r' % (what, speed))
+        result['speed_duplex'] = speed
+    if 'dual_mode' in interface:
+        mode = interface['dual_mode']
+        if not isinstance(mode, bool):
+            mode = _number(mode, what + ' dual_mode')
+            if not 1 <= mode <= 4095:
+                raise FastIronConfigError('%s dual_mode must be true, false or a VLAN id, got %r' % (what, mode))
+        result['dual_mode'] = mode
+    return result
+
+
 def normalize_model(model):
     """Validate a model and return it in the shape parse_config() returns.
 
@@ -105,7 +133,7 @@ def normalize_model(model):
     _require_mapping(model, 'the model')
     _check_keys(model, SECTIONS + ('hostname', 'version'), 'the model')
     result = {'hostname': model.get('hostname'), 'version': None, 'system_max': {},
-              'vlans': {}, 'lags': {}, 've_addresses': {}, 'clusters': {}}
+              'vlans': {}, 'lags': {}, 've_addresses': {}, 'clusters': {}, 'interfaces': {}}
     managed = [s for s in SECTIONS if s in model]
 
     for key, value in _require_mapping(model.get('system_max') or {}, 'system_max').items():
@@ -115,6 +143,15 @@ def normalize_model(model):
         if number < 1:
             raise FastIronConfigError('system_max %s must be a positive number, got %r' % (key, value))
         result['system_max'][key] = number
+
+    for key, interface in _require_mapping(model.get('interfaces') or {}, 'interfaces').items():
+        ports = parse_ports(str(key).split())
+        if len(ports) != 1 or ports[0] != str(key):
+            raise FastIronConfigError('interfaces must be keyed by single ports such as 1/1/7, got %r' % (key,))
+        what = 'interface %s' % key
+        interface = _require_mapping(interface or {}, what)
+        _check_keys(interface, ('name', 'speed_duplex', 'dual_mode'), what)
+        result['interfaces'][ports[0]] = _interface(interface, what)
 
     for key, vlan in _require_mapping(model.get('vlans') or {}, 'vlans').items():
         vid = _number(key, 'VLAN id')
@@ -148,6 +185,14 @@ def normalize_model(model):
         result['lags'][str(name)] = {'type': lag['type'], 'id': _number(lag.get('id'), what + ' id'),
                                      'ports': ports, 'primary_port': primary,
                                      'deployed': _bool(lag.get('deployed', True), what + ' deployed')}
+
+    # FastIron takes a deployed LAG's settings on its primary port only.
+    for name, lag in result['lags'].items():
+        for port in lag['ports']:
+            interface = result['interfaces'].get(port, {})
+            if port != lag['primary_port'] and interface.get('dual_mode') not in (None, False):
+                raise FastIronConfigError('interface %s is in LAG %s: set dual_mode on its primary port %s'
+                                          % (port, name, lag['primary_port']))
 
     for key, addresses in _require_mapping(model.get('ve_addresses') or {}, 've_addresses').items():
         ve = _number(key, 'VE number')
@@ -287,6 +332,9 @@ def config_drift(running, model, remove=None, protected_vlans=None):
             findings.append(_finding('warning', 'system_max_unmanaged', 'system-max %s' % key,
                                      'system-max %s is not in the model' % key, False))
 
+    if 'interfaces' in managed:
+        findings.extend(_interface_drift(current, want))
+
     if 'vlans' in managed:
         for vid, vlan in sorted(want['vlans'].items()):
             obj = 'vlan %d' % vid
@@ -364,6 +412,36 @@ def config_drift(running, model, remove=None, protected_vlans=None):
         for name in sorted(set(current['clusters']) - set(want['clusters'])):
             findings.append(_finding('warning', 'cluster_unmanaged', 'cluster %s' % name,
                                      'cluster %s is not in the model' % name, False))
+    return findings
+
+
+_NO_INTERFACE = {'name': None, 'speed_duplex': None, 'dual_mode': False}
+
+
+def _dual_mode_text(mode):
+    return {False: 'off', True: 'on (default VLAN)'}.get(mode, 'on (VLAN %s)' % mode)
+
+
+def _interface_drift(current, want):
+    findings = []
+    for port, interface in sorted(want['interfaces'].items(), key=lambda item: _port_key(item[0])):
+        obj = 'interface ethernet %s' % port
+        have = current['interfaces'].get(port, _NO_INTERFACE)
+        if 'name' in interface and have['name'] != interface['name']:
+            findings.append(_finding('error', 'interface_name', obj, 'port %s is named %s, should be %s'
+                                     % (port, have['name'], interface['name']), True))
+        if 'speed_duplex' in interface and have['speed_duplex'] != interface['speed_duplex']:
+            findings.append(_finding('error', 'interface_speed_duplex', obj, 'port %s speed-duplex is %s, should be %s'
+                                     % (port, have['speed_duplex'] or 'the default', interface['speed_duplex']),
+                                     True))
+        if 'dual_mode' in interface and have['dual_mode'] != interface['dual_mode']:
+            # Only turning dual-mode on is an addition; turning it off or
+            # moving it to another VLAN changes which VLAN the port's untagged
+            # traffic lands in, so that's done by hand.
+            findings.append(_finding('error', 'interface_dual_mode', obj, 'port %s dual-mode is %s, should be %s'
+                                     % (port, _dual_mode_text(have['dual_mode']),
+                                        _dual_mode_text(interface['dual_mode'])),
+                                     have['dual_mode'] is False))
     return findings
 
 
@@ -451,12 +529,32 @@ def _client_lines(name, client):
     return lines
 
 
+def _interface_commands(current, want, keys):
+    lines = []
+    for port, interface in sorted(want['interfaces'].items(), key=lambda item: _port_key(item[0])):
+        have = current['interfaces'].get(port, _NO_INTERFACE)
+        body = []
+        if 'name' in keys and 'name' in interface and have['name'] != interface['name']:
+            body.append(' port-name "%s"' % interface['name'] if ' ' in interface['name']
+                        else ' port-name %s' % interface['name'])
+        if 'speed_duplex' in keys and 'speed_duplex' in interface and \
+                have['speed_duplex'] != interface['speed_duplex']:
+            body.append(' speed-duplex %s' % interface['speed_duplex'])
+        if 'dual_mode' in keys and interface.get('dual_mode') not in (None, False) and have['dual_mode'] is False:
+            body.append(' dual-mode' if interface['dual_mode'] is True else ' dual-mode %d' % interface['dual_mode'])
+        if body:
+            lines.append('interface ethernet %s' % port)
+            lines.extend(body)
+    return lines
+
+
 def config_commands(running, model):
     """Commands that make a running configuration (text or parsed) match a model, as far as adding goes.
 
     Returns configuration lines, nested blocks indented by one space, in the
-    order they can be applied: system-max settings, LAGs, VLANs, VE addresses,
-    clusters. A system-max setting only takes effect once the configuration is
+    order they can be applied: system-max settings, port names and speed-duplex
+    (ports must match before they are put in a LAG), LAGs, VLANs, dual-mode
+    (which needs the port tagged in a VLAN), VE addresses, clusters. A system-max setting only takes effect once the configuration is
     saved and the switch reloaded, which is left to the caller. Drift that
     needs removing something or changing a LAG or cluster in place gets no
     commands; config_drift() reports it.
@@ -469,6 +567,9 @@ def config_commands(running, model):
         for key, value in sorted(want['system_max'].items()):
             if current['system_max'].get(key) != value:
                 lines.append('system-max %s %d' % (key, value))
+
+    if 'interfaces' in managed:
+        lines.extend(_interface_commands(current, want, ('name', 'speed_duplex')))
 
     if 'lags' in managed:
         for name, lag in sorted(want['lags'].items()):
@@ -503,6 +604,9 @@ def config_commands(running, model):
                 continue
             lines.append(header)
             lines.extend(body)
+
+    if 'interfaces' in managed:
+        lines.extend(_interface_commands(current, want, ('dual_mode',)))
 
     if 've_addresses' in managed:
         for ve, addresses in sorted(want['ve_addresses'].items()):
