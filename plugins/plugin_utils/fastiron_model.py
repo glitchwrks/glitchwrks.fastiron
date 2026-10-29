@@ -186,13 +186,20 @@ def normalize_model(model):
                                      'ports': ports, 'primary_port': primary,
                                      'deployed': _bool(lag.get('deployed', True), what + ' deployed')}
 
-    # FastIron takes a deployed LAG's settings on its primary port only.
+    # FastIron takes a deployed LAG's settings on its primary port only, and
+    # runs all of its ports at the primary port's speed.
     for name, lag in result['lags'].items():
+        speeds = set()
         for port in lag['ports']:
             interface = result['interfaces'].get(port, {})
             if port != lag['primary_port'] and interface.get('dual_mode') not in (None, False):
                 raise FastIronConfigError('interface %s is in LAG %s: set dual_mode on its primary port %s'
                                           % (port, name, lag['primary_port']))
+            if 'speed_duplex' in interface:
+                speeds.add(interface['speed_duplex'])
+        if len(speeds) > 1:
+            raise FastIronConfigError('LAG %s ports have different speed_duplex settings: %s'
+                                      % (name, ', '.join(sorted(speeds))))
 
     for key, addresses in _require_mapping(model.get('ve_addresses') or {}, 've_addresses').items():
         ve = _number(key, 'VE number')
@@ -529,22 +536,43 @@ def _client_lines(name, client):
     return lines
 
 
+def _port_name(name):
+    return '"%s"' % name if ' ' in name else name
+
+
+def _deployed_lag_of(config, port):
+    """The name and settings of the deployed LAG port is in, or (None, None)."""
+    for name, lag in sorted(config['lags'].items()):
+        if lag['deployed'] and port in lag['ports']:
+            return name, lag
+    return None, None
+
+
 def _interface_commands(current, want, keys):
     lines = []
+    lag_names = {}  # names of deployed LAG ports, set in the LAG: {lag name: [(port, name)]}
     for port, interface in sorted(want['interfaces'].items(), key=lambda item: _port_key(item[0])):
         have = current['interfaces'].get(port, _NO_INTERFACE)
+        lag_name, lag = _deployed_lag_of(current, port)
         body = []
         if 'name' in keys and 'name' in interface and have['name'] != interface['name']:
-            body.append(' port-name "%s"' % interface['name'] if ' ' in interface['name']
-                        else ' port-name %s' % interface['name'])
+            if lag_name:
+                lag_names.setdefault(lag_name, []).append((port, interface['name']))
+            else:
+                body.append(' port-name %s' % _port_name(interface['name']))
+        # A deployed LAG's speed is set on its primary port, for all of its ports.
         if 'speed_duplex' in keys and 'speed_duplex' in interface and \
-                have['speed_duplex'] != interface['speed_duplex']:
+                have['speed_duplex'] != interface['speed_duplex'] and \
+                (lag is None or port == lag['primary_port']):
             body.append(' speed-duplex %s' % interface['speed_duplex'])
         if 'dual_mode' in keys and interface.get('dual_mode') not in (None, False) and have['dual_mode'] is False:
             body.append(' dual-mode' if interface['dual_mode'] is True else ' dual-mode %d' % interface['dual_mode'])
         if body:
             lines.append('interface ethernet %s' % port)
             lines.extend(body)
+    for lag_name, names in sorted(lag_names.items()):
+        lines.append(_lag_header(lag_name, current['lags'][lag_name]))
+        lines.extend(' port-name %s ethernet %s' % (_port_name(name), port) for port, name in names)
     return lines
 
 
