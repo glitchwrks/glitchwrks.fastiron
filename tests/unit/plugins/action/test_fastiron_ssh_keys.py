@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from unittest.mock import MagicMock
 
@@ -189,6 +190,33 @@ def test_other_connection_failures_are_not_retried(switch, clock):
         run(switch, [RSA])
     assert switch.ssh._connect.call_count == 1
     assert clock[0] == 0
+
+
+def test_libssh_messages_are_shown_at_vvv_not_on_stderr(switch, clock, mocker):
+    # In a worker process the pylibssh logger has no handler, so Python would
+    # print its warnings, such as each refused connection, to stderr. (pytest
+    # captures logging itself, so the test checks that nothing propagates.)
+    pylibssh = logging.getLogger('ansible-pylibssh')
+    attempts = []
+
+    def connect():
+        assert pylibssh.propagate is False
+        attempts.append(1)
+        pylibssh.warning('ssh_client_connection_callback: Socket error: disconnected')
+        if len(attempts) < 3:
+            raise AnsibleError('ssh connect failed: Socket error: disconnected')
+        switch.connect()
+    switch.ssh._connect.side_effect = connect
+    vvv = mocker.patch('ansible.plugins.action.display')
+    handlers = list(pylibssh.handlers)
+
+    result = run(switch, [RSA])
+
+    assert result['changed'] is True and not result.get('failed')
+    shown = [call.args[0] for call in vvv.vvv.call_args_list]
+    assert shown.count('libssh: ssh_client_connection_callback: Socket error: disconnected') == 3
+    # The logger is left as it was.
+    assert pylibssh.handlers == handlers and pylibssh.propagate
 
 
 def test_check_mode_reports_the_change_without_uploading(switch):
