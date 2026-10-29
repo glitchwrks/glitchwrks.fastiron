@@ -1,0 +1,7 @@
+---
+minor_changes:
+  - "fastiron_parse_config - parse ``system-max`` settings from running configurations into ``system_max``."
+  - "fastiron_model_config, fastiron_config_drift, fastiron_config_commands - a model can declare
+    ``system_max`` settings, such as ``system_max: {vlan: 1024}``. Differences are reported as drift and
+    fixed with ``system-max`` commands, which take effect only after the configuration is saved and the
+    switch reloaded; reloading is left to the caller."

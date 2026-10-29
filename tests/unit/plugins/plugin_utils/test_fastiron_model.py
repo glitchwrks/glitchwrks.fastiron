@@ -300,3 +300,67 @@ def test_no_undeploy_for_an_undeployed_cluster(cs1a, model):
     assert running != cs1a
     model['vlans'][3001]['tagged'] = ['1/1/40']
     assert clusters_to_undeploy(running, model, remove=['vlan_ports']) == []
+
+
+# system-max settings
+
+
+def with_system_max(text, line):
+    return text.replace('ver 08.0.30uT323\n', 'ver 08.0.30uT323\n!\n%s\n' % line, 1)
+
+
+def test_parse_system_max(cs1a):
+    assert parse_config(cs1a)['system_max'] == {}
+    assert parse_config(with_system_max(cs1a, 'system-max vlan 1024'))['system_max'] == {'vlan': 1024}
+
+
+def test_system_max_unset_is_drift_with_a_command(cs1a, model):
+    model['system_max'] = {'vlan': 1024}
+    findings = config_drift(cs1a, model)
+    assert rules(findings) == [('system_max', True)]
+    assert 'is the default, should be 1024' in findings[0]['message']
+    assert config_commands(cs1a, model) == ['system-max vlan 1024']
+
+
+def test_system_max_changed_value(cs1a, model):
+    model['system_max'] = {'vlan': 1024}
+    running = with_system_max(cs1a, 'system-max vlan 256')
+    assert 'is 256, should be 1024' in config_drift(running, model)[0]['message']
+    assert config_commands(running, model) == ['system-max vlan 1024']
+
+
+def test_system_max_matching_is_clean(cs1a, model):
+    model['system_max'] = {'vlan': 1024}
+    running = with_system_max(cs1a, 'system-max vlan 1024')
+    assert config_drift(running, model) == []
+    assert config_commands(running, model) == []
+
+
+def test_system_max_comes_before_vlans(model):
+    model['system_max'] = {'vlan': 1024}
+    commands = config_commands(EMPTY, model)
+    assert commands[0] == 'system-max vlan 1024'
+    rebuilt = 'Current configuration:\n!\n%s\nend\n' % '\n'.join(commands)
+    assert config_drift(rebuilt, model) == []
+
+
+def test_system_max_not_in_model_is_left_alone(cs1a, model):
+    running = with_system_max(cs1a, 'system-max vlan 1024')
+    assert config_drift(running, model) == []
+    model['system_max'] = {}
+    assert rules(config_drift(running, model)) == [('system_max_unmanaged', False)]
+    assert config_commands(running, model) == []
+
+
+@pytest.mark.parametrize('system_max', [
+    {'vlan': 0},
+    {'vlan': 'many'},
+    {'vlan': True},
+    {'ip route': 1024},
+    {'VLAN': 1024},
+    [1024],
+])
+def test_system_max_validation(model, system_max):
+    model['system_max'] = system_max
+    with pytest.raises(FastIronConfigError):
+        normalize_model(model)

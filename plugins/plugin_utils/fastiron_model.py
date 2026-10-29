@@ -4,14 +4,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Compare FastIron running configurations with a declared model.
 
-A model describes VLANs, LAGs, VE interface addresses and MCT clusters in the
-same shape parse_config() returns, so a model can be bootstrapped from a
+A model describes VLANs, LAGs, VE interface addresses, MCT clusters and
+system-max settings in the same shape parse_config() returns, so a model can be bootstrapped from a
 parsed running configuration, and the MCT checks work on models too. Only the
 sections a model declares are compared; the others are left alone.
 
 Changes are additive: commands are generated only for what can be added
 safely (missing VLANs, ports, addresses, LAGs, clusters and clients, VLAN
-names, deploying). Anything that needs removing something, or changing a LAG
+names, deploying), plus system-max settings, which only take effect once the
+configuration is saved and the switch reloaded. Anything that needs removing something, or changing a LAG
 or cluster in place, is reported as drift to fix by hand.
 
 Runs on the controller.
@@ -20,6 +21,7 @@ Runs on the controller.
 from __future__ import annotations
 
 import ipaddress
+import re
 from collections.abc import Mapping
 
 from ansible.module_utils.common.collections import is_sequence
@@ -30,11 +32,12 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
     parse_ports,
 )
 
-SECTIONS = ('vlans', 'lags', 've_addresses', 'clusters')
+SECTIONS = ('system_max', 'vlans', 'lags', 've_addresses', 'clusters')
 # What config_removals() can remove, when asked to. Nothing is removed by
 # default.
 REMOVABLE = ('vlan_ports',)
 LAG_TYPES = ('static', 'dynamic')
+_SYSTEM_MAX_RE = re.compile(r'^[a-z0-9][a-z0-9-]*$')
 
 
 # Validating a model
@@ -101,9 +104,17 @@ def normalize_model(model):
     """
     _require_mapping(model, 'the model')
     _check_keys(model, SECTIONS + ('hostname', 'version'), 'the model')
-    result = {'hostname': model.get('hostname'), 'version': None,
+    result = {'hostname': model.get('hostname'), 'version': None, 'system_max': {},
               'vlans': {}, 'lags': {}, 've_addresses': {}, 'clusters': {}}
     managed = [s for s in SECTIONS if s in model]
+
+    for key, value in _require_mapping(model.get('system_max') or {}, 'system_max').items():
+        if not isinstance(key, str) or not _SYSTEM_MAX_RE.match(key):
+            raise FastIronConfigError('system_max parameter must be a word such as vlan, got %r' % (key,))
+        number = _number(value, 'system_max %s' % key)
+        if number < 1:
+            raise FastIronConfigError('system_max %s must be a positive number, got %r' % (key, value))
+        result['system_max'][key] = number
 
     for key, vlan in _require_mapping(model.get('vlans') or {}, 'vlans').items():
         vid = _number(key, 'VLAN id')
@@ -263,6 +274,18 @@ def config_drift(running, model, remove=None, protected_vlans=None):
     want, managed = normalize_model(model)
     removable, protected = _removal_settings(current, want, remove, protected_vlans)
     findings = []
+
+    if 'system_max' in managed:
+        for key, value in sorted(want['system_max'].items()):
+            have = current['system_max'].get(key)
+            if have != value:
+                findings.append(_finding('error', 'system_max', 'system-max %s' % key,
+                                         'system-max %s is %s, should be %d (takes effect after saving and '
+                                         'reloading the switch)'
+                                         % (key, 'the default' if have is None else have, value), True))
+        for key in sorted(set(current['system_max']) - set(want['system_max'])):
+            findings.append(_finding('warning', 'system_max_unmanaged', 'system-max %s' % key,
+                                     'system-max %s is not in the model' % key, False))
 
     if 'vlans' in managed:
         for vid, vlan in sorted(want['vlans'].items()):
@@ -432,13 +455,20 @@ def config_commands(running, model):
     """Commands that make a running configuration (text or parsed) match a model, as far as adding goes.
 
     Returns configuration lines, nested blocks indented by one space, in the
-    order they can be applied: LAGs, VLANs, VE addresses, clusters. Drift that
+    order they can be applied: system-max settings, LAGs, VLANs, VE addresses,
+    clusters. A system-max setting only takes effect once the configuration is
+    saved and the switch reloaded, which is left to the caller. Drift that
     needs removing something or changing a LAG or cluster in place gets no
     commands; config_drift() reports it.
     """
     current = _parsed(running)
     want, managed = normalize_model(model)
     lines = []
+
+    if 'system_max' in managed:
+        for key, value in sorted(want['system_max'].items()):
+            if current['system_max'].get(key) != value:
+                lines.append('system-max %s %d' % (key, value))
 
     if 'lags' in managed:
         for name, lag in sorted(want['lags'].items()):

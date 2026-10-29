@@ -8,7 +8,8 @@ DOCUMENTATION:
   version_added: 0.1.0
   short_description: Validate a FastIron configuration model
   description:
-    - Validates a model of a switch's VLANs, LAGs, VE interface addresses and MCT clusters, and returns it in
+    - Validates a model of a switch's system-max settings, VLANs, LAGs, VE interface addresses and MCT
+      clusters, and returns it in
       the shape P(glitchwrks.fastiron.fastiron_parse_config#filter) returns, with defaults filled in.
     - The result can be checked with P(glitchwrks.fastiron.fastiron_mct_audit#filter) and
       P(glitchwrks.fastiron.fastiron_mct_compare#filter) before any switch is changed.
@@ -21,6 +22,10 @@ DOCUMENTATION:
       description:
         - The model, a dictionary with any of the keys below. Only the sections a model has are compared
           with a running configuration; the others are left alone.
+        - C(system_max) maps system-max parameters, as the switch names them (such as V(vlan) or
+          V(spanning-tree)), to positive numbers. Changes take effect only after the configuration is saved
+          and the switch reloaded. List only values that differ from the switch's defaults, because the running
+          configuration does not show defaults and a default value in the model always shows as drift.
         - C(vlans) maps VLAN ids to C(name) (one word), C(tagged) and C(untagged) (lists of ports such as
           V(1/1/7), or strings in switch syntax such as V(ethe 1/1/7 to 1/1/8)), and C(router_interface)
           (a VE number).

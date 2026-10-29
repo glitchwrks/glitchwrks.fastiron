@@ -35,7 +35,7 @@ def test_model_filters_take_text_or_parsed_configurations(cs1a):
 def test_model_config_returns_the_parsed_shape():
     config = FILTERS['fastiron_model_config']({'vlans': {10: {}}})
     assert config['vlans'] == {10: {'name': None, 'tagged': [], 'untagged': [], 'router_interface': None}}
-    assert set(config) == {'hostname', 'version', 'vlans', 'lags', 've_addresses', 'clusters'}
+    assert set(config) == {'hostname', 'version', 'system_max', 'vlans', 'lags', 've_addresses', 'clusters'}
 
 
 @pytest.mark.parametrize('name, args', [
