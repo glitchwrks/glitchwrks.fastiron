@@ -101,8 +101,9 @@ def parse_config(text):
             result['system_max'][words[1]] = int(words[2])
         elif words[0] == 'vlan' and len(words) > 1 and _int(words[1]) is not None:
             vlan = {'name': None, 'tagged': [], 'untagged': [], 'router_interface': None}
-            if 'name' in words:
-                vlan['name'] = words[words.index('name') + 1]
+            name = re.search(r'\sname\s+("[^"]*"|\S+)', head)
+            if name:
+                vlan['name'] = name.group(1).strip('"')
             for child in children:
                 cw = child.split()
                 if cw[0] in ('tagged', 'untagged'):

@@ -494,3 +494,9 @@ def test_dual_mode_belongs_on_a_lags_primary_port():
         normalize_model(model)
     model['interfaces'] = {'1/3/5': {'dual_mode': True}, '1/3/6': {'name': 'ix1.gw2.bee'}}
     normalize_model(model)
+
+
+def test_parse_quoted_vlan_name():
+    text = INTERFACES.replace('vlan 11 name Wireless by port', 'vlan 11 name "gateway crossconnect" by port')
+    assert parse_config(text)['vlans'][11]['name'] == 'gateway crossconnect'
+    assert parse_config(INTERFACES)['vlans'][11]['name'] == 'Wireless'
