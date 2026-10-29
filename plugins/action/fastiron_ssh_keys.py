@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import time
+
 from ansible.module_utils.common.text.converters import to_text
 from ansible.module_utils.connection import Connection, ConnectionError
 from ansible.plugins.action import ActionBase
@@ -20,6 +22,14 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_ssh_k
 
 # The name the switch's SCP server uses for the client public key list.
 KEY_FILE = 'sshPubKey'
+
+# Some FastIron builds (ICX 6610, 08.0.30uT7f3) refuse a new SSH connection for
+# about 13 seconds after the last one, by dropping it during key exchange. The
+# upload connection follows the persistent connection closely, so it is retried
+# for a while when that happens.
+RETRY_SECONDS = 30
+RETRY_INTERVAL = 2
+_REFUSED = 'Socket error: disconnected'
 
 
 class ActionModule(ActionBase):
@@ -102,7 +112,7 @@ class ActionModule(ActionBase):
             raise FastIronKeyError('uploading keys requires ansible_network_cli_ssh_type set to libssh')
         ssh = self._connection.ssh_type_conn
         try:
-            ssh._connect()
+            self._connect(ssh)
             channel = ssh.ssh.new_channel()
             try:
                 if not scp_send(channel, KEY_FILE, data, timeout):
@@ -114,3 +124,16 @@ class ActionModule(ActionBase):
             # A connection that failed has no session to close.
             if hasattr(ssh, 'ssh'):
                 ssh.close()
+
+    def _connect(self, ssh):
+        """Connect, retrying while the switch refuses new connections."""
+        deadline = time.monotonic() + RETRY_SECONDS
+        while True:
+            try:
+                ssh._connect()
+                return
+            except Exception as e:
+                if _REFUSED not in to_text(e) or time.monotonic() + RETRY_INTERVAL > deadline:
+                    raise
+                self._display.vvv('the switch refused the upload connection, retrying in %ds' % RETRY_INTERVAL)
+                time.sleep(RETRY_INTERVAL)
