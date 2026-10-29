@@ -150,6 +150,47 @@ def test_failed_upload_connection_is_reported(switch):
     switch.ssh.close.assert_not_called()
 
 
+@pytest.fixture
+def clock(mocker):
+    """A clock that only moves when the action sleeps."""
+    now = [0.0]
+    module = 'ansible_collections.glitchwrks.fastiron.plugins.action.fastiron_ssh_keys.time'
+    mocker.patch(module + '.monotonic', side_effect=lambda: now[0])
+    mocker.patch(module + '.sleep', side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds))
+    return now
+
+
+def test_upload_connection_is_retried_while_the_switch_refuses_it(switch, clock):
+    refusals = [AnsibleError('ssh connection failed: ssh connect failed: Socket error: disconnected')] * 6
+
+    def connect():
+        if refusals:
+            raise refusals.pop(0)
+        switch.connect()
+    switch.ssh._connect.side_effect = connect
+    result = run(switch, [RSA])
+    assert result['changed'] is True and not result.get('failed')
+    assert switch.ssh._connect.call_count == 7
+    assert clock[0] == 12
+    assert len(switch.uploads) == 1
+
+
+def test_upload_connection_gives_up_after_the_retry_window(switch, clock):
+    switch.ssh._connect.side_effect = AnsibleError('ssh connect failed: Socket error: disconnected')
+    with pytest.raises(AnsibleError, match='disconnected'):
+        run(switch, [RSA])
+    assert clock[0] <= 30
+    assert switch.ssh._connect.call_count == 16  # at 0, 2, ... 30 seconds
+
+
+def test_other_connection_failures_are_not_retried(switch, clock):
+    switch.ssh._connect.side_effect = AnsibleError('ssh connect failed: Access denied')
+    with pytest.raises(AnsibleError, match='Access denied'):
+        run(switch, [RSA])
+    assert switch.ssh._connect.call_count == 1
+    assert clock[0] == 0
+
+
 def test_check_mode_reports_the_change_without_uploading(switch):
     result = run(switch, [RSA], check_mode=True, diff=True)
     assert result['changed'] is True

@@ -1,0 +1,6 @@
+---
+bugfixes:
+  - "fastiron_ssh_keys - retry the upload connection for up to 30 seconds when the switch drops it during key
+    exchange. Some FastIron builds (ICX 6610, 08.0.30uT7f3) refuse new SSH connections for about 13 seconds
+    after the last one, so the upload, which follows the persistent connection closely, failed with
+    ``Socket error: disconnected``."
