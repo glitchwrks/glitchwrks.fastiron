@@ -1,0 +1,8 @@
+---
+bugfixes:
+  - "fastiron_parse_config, fastiron_config_drift, fastiron_config_commands - read a deployed LAG's port names
+    from the LAG. Once a LAG is deployed, FastIron lists its ports' names in the LAG block (``port-name NAME
+    ethernet PORT``) and drops its secondary ports' interface blocks, so those ports showed as unnamed and at the
+    default speed, and their names were sent again on every run. Secondary ports now get the primary port's
+    ``speed-duplex``, names of deployed LAG ports are set through the LAG, and a deployed LAG's speed is set on
+    its primary port. A model giving one LAG's ports different ``speed_duplex`` settings is rejected."
