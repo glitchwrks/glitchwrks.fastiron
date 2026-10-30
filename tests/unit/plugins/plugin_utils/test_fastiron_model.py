@@ -500,3 +500,83 @@ def test_parse_quoted_vlan_name():
     text = INTERFACES.replace('vlan 11 name Wireless by port', 'vlan 11 name "gateway crossconnect" by port')
     assert parse_config(text)['vlans'][11]['name'] == 'gateway crossconnect'
     assert parse_config(INTERFACES)['vlans'][11]['name'] == 'Wireless'
+
+
+# Deployed LAGs: FastIron moves their ports' names into the LAG block and drops
+# the secondary ports' interface blocks (seen on an ICX 6610, 08.0.30uT7f3).
+
+DEPLOYED_LAG = '''Current configuration:
+!
+ver 08.0.30uT7f3
+!
+lag gw2_bee dynamic id 12
+ ports ethernet 1/3/5 to 1/3/6
+ primary-port 1/3/5
+ deploy
+ port-name ix0.gw2.bee ethernet 1/3/5
+ port-name "ix1 gw2" ethernet 1/3/6
+!
+vlan 1 name DEFAULT-VLAN by port
+!
+interface ethernet 1/3/5
+ port-name ix0.gw2.bee
+ dual-mode
+ speed-duplex 10G-full
+!
+end
+'''
+
+GW2_MODEL = {
+    'interfaces': {'1/3/5': {'name': 'ix0.gw2.bee', 'speed_duplex': '10G-full', 'dual_mode': True},
+                   '1/3/6': {'name': 'ix1 gw2', 'speed_duplex': '10G-full'}},
+    'lags': {'gw2_bee': {'type': 'dynamic', 'id': 12, 'ports': ['1/3/5', '1/3/6']}},
+}
+
+
+def test_parse_deployed_lag_port_names_and_speed():
+    interfaces = parse_config(DEPLOYED_LAG)['interfaces']
+    assert interfaces['1/3/5'] == {'name': 'ix0.gw2.bee', 'speed_duplex': '10G-full', 'dual_mode': True}
+    # No interface block of its own: named in the LAG, at the primary port's speed.
+    assert interfaces['1/3/6'] == {'name': 'ix1 gw2', 'speed_duplex': '10G-full', 'dual_mode': False}
+
+
+def test_deployed_lag_ports_match_the_model():
+    assert config_drift(DEPLOYED_LAG, GW2_MODEL) == []
+    assert config_commands(DEPLOYED_LAG, GW2_MODEL) == []
+
+
+def test_undeployed_lag_secondary_keeps_its_own_speed():
+    text = DEPLOYED_LAG.replace(' deploy\n', '')
+    assert parse_config(text)['interfaces']['1/3/6']['speed_duplex'] is None
+
+
+def test_deployed_lag_port_renamed_through_the_lag():
+    model = copy.deepcopy(GW2_MODEL)
+    model['interfaces']['1/3/6']['name'] = 'ix1.gw2.bee'
+    model['interfaces']['1/3/5']['name'] = 'gw2 uplink'
+    assert rules(config_drift(DEPLOYED_LAG, model)) == [('interface_name', True), ('interface_name', True)]
+    commands = config_commands(DEPLOYED_LAG, model)
+    assert commands == ['lag "gw2_bee" dynamic id 12', ' port-name "gw2 uplink" ethernet 1/3/5',
+                        ' port-name ix1.gw2.bee ethernet 1/3/6']
+
+
+def test_deployed_lag_speed_is_set_on_its_primary_port():
+    model = copy.deepcopy(GW2_MODEL)
+    model['interfaces']['1/3/5']['speed_duplex'] = '1000-full'
+    model['interfaces']['1/3/6']['speed_duplex'] = '1000-full'
+    assert config_commands(DEPLOYED_LAG, model) == ['interface ethernet 1/3/5', ' speed-duplex 1000-full']
+
+
+def test_lag_ports_need_one_speed():
+    model = copy.deepcopy(GW2_MODEL)
+    model['interfaces']['1/3/6']['speed_duplex'] = '1000-full'
+    with pytest.raises(FastIronConfigError, match='LAG gw2_bee ports have different speed_duplex'):
+        normalize_model(model)
+
+
+def test_names_set_before_a_new_lag_read_back_after_it_is_deployed():
+    # The commands for a new LAG name its ports before deploying it; FastIron
+    # then shows the names in the LAG. Either way the model matches.
+    commands = config_commands(EMPTY, GW2_MODEL)
+    assert commands[:2] == ['interface ethernet 1/3/5', ' port-name ix0.gw2.bee']
+    assert config_drift(DEPLOYED_LAG, GW2_MODEL) == []

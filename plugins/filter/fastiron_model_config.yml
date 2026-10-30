@@ -29,7 +29,9 @@ DOCUMENTATION:
         - C(interfaces) maps single ports, such as V(1/3/5), to C(name) (the port name, any text without
           double quotes), C(speed_duplex) (as the switch writes it, such as V(10G-full)) and C(dual_mode)
           (V(true) for dual-mode on the default VLAN, a VLAN id, or V(false)). Only the settings listed, and
-          not V(null), are compared. On a LAG, set C(dual_mode) on its primary port.
+          not V(null), are compared. On a LAG, set C(dual_mode) on its primary port, and give all of its ports
+          the same C(speed_duplex), if any, since a deployed LAG runs at its primary port's speed. A deployed LAG's
+          port names are kept in the LAG, and are compared and set there.
         - C(vlans) maps VLAN ids to C(name) (one word), C(tagged) and C(untagged) (lists of ports such as
           V(1/1/7), or strings in switch syntax such as V(ethe 1/1/7 to 1/1/8)), and C(router_interface)
           (a VE number).

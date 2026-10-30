@@ -13,6 +13,9 @@ import ipaddress
 import re
 
 _PORT_RE = re.compile(r'^\d+(?:/\d+)*$')
+# A deployed LAG lists its ports' names: port-name ix0.gw2.bee ethernet 1/3/5
+_LAG_PORT_NAME_RE = re.compile(r'^port-name\s+("[^"]*"|\S+)\s+ethe\S*\s+(\S+)\s*$')
+_NO_INTERFACE = {'name': None, 'speed_duplex': None, 'dual_mode': False}
 
 
 class FastIronConfigError(Exception):
@@ -87,10 +90,17 @@ def parse_config(text):
     interfaces maps each port with an "interface ethernet" block to its name
     (port-name, or None), speed_duplex (or None) and dual_mode: False, True
     for dual-mode on the default VLAN, or the VLAN id given to dual-mode.
+
+    Once a LAG is deployed, FastIron lists its ports' names in the LAG block
+    ("port-name NAME ethernet PORT") and drops its secondary ports' interface
+    blocks; they run at the primary port's speed. Those names are read from
+    the LAG, and the secondary ports get the primary port's speed_duplex, so
+    a port's settings read the same before and after it joins a LAG.
     """
     result = {'hostname': None, 'version': None, 'system_max': {}, 'vlans': {}, 'lags': {}, 've_addresses': {},
               'clusters': {}, 'interfaces': {}}
 
+    lag_port_names = {}
     for head, children in _blocks(text):
         words = head.split()
         if words[0] == 'hostname' and len(words) > 1:
@@ -117,7 +127,10 @@ def parse_config(text):
                    'ports': [], 'primary_port': None, 'deployed': False}
             for child in children:
                 cw = child.split()
-                if cw[0] == 'ports':
+                port_name = _LAG_PORT_NAME_RE.match(child.strip())
+                if port_name:
+                    lag_port_names[port_name.group(2)] = port_name.group(1).strip('"')
+                elif cw[0] == 'ports':
                     lag['ports'].extend(parse_ports(cw[1:]))
                 elif cw[0] == 'primary-port' and len(cw) > 1:
                     lag['primary_port'] = cw[1]
@@ -126,8 +139,7 @@ def parse_config(text):
             result['lags'][m.group(1) if m else words[1].strip('"')] = lag
         elif words[0] == 'interface' and len(words) > 2 and words[1].startswith('ethe'):
             for port in parse_ports(words[2:]):
-                _parse_interface(result['interfaces'].setdefault(
-                    port, {'name': None, 'speed_duplex': None, 'dual_mode': False}), children)
+                _parse_interface(result['interfaces'].setdefault(port, dict(_NO_INTERFACE)), children)
         elif words[0] == 'interface' and len(words) > 2 and words[1] == 've':
             for child in children:
                 cw = child.split()
@@ -136,6 +148,16 @@ def parse_config(text):
                     result['ve_addresses'].setdefault(_int(words[2]), []).append(address)
         elif words[0] == 'cluster' and len(words) > 1:
             result['clusters'][words[1]] = _parse_cluster(words, children)
+    for port, name in lag_port_names.items():
+        result['interfaces'].setdefault(port, dict(_NO_INTERFACE))['name'] = name
+    for lag in result['lags'].values():
+        primary = result['interfaces'].get(lag['primary_port'])
+        if not lag['deployed'] or primary is None:
+            continue
+        for port in lag['ports']:
+            interface = result['interfaces'].setdefault(port, dict(_NO_INTERFACE))
+            if port != lag['primary_port'] and interface['speed_duplex'] is None:
+                interface['speed_duplex'] = primary['speed_duplex']
     return result
 
 

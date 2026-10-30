@@ -40,6 +40,8 @@ RETURN:
         show them.
       - C(interfaces) maps each port with an C(interface ethernet) block to C(name), C(speed_duplex) (both
         V(null) when not set) and C(dual_mode) (V(false), V(true) for the default VLAN, or a VLAN id).
+        A deployed LAG's port names are read from the LAG's C(port-name NAME ethernet PORT) lines, and its
+        secondary ports, which have no interface block of their own, get the primary port's C(speed_duplex).
       - Each cluster has C(id), C(rbridge_id), C(session_vlan), C(keep_alive_vlan), C(icl),
         C(peers), C(deployed) and C(clients).
     type: dict
