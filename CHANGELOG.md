@@ -15,7 +15,7 @@
 <a id="release-summary"></a>
 ### Release Summary
 
-Initial release\. Ansible support for Brocade / Ruckus FastIron switches over <code>network\_cli</code>\, tested against ICX 6650 switches running FastIron 08\.0\.30\, with filters that check MCT cluster configurations for mistakes before a failover exposes them\.
+Initial release\. Ansible support for Brocade / Ruckus FastIron switches over <code>network\_cli</code>\, tested against ICX 6650 and ICX 6610 switches running FastIron 08\.0\.30\: managing the switches\' SSH client public keys\, filters that bring a switch in line with a model of its VLANs\, LAGs\, interfaces and MCT clusters\, and filters that check MCT cluster configurations and live state for mistakes and faults before a failover exposes them\.
 
 <a id="new-plugins"></a>
 ### New Plugins

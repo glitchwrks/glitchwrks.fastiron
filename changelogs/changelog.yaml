@@ -2,10 +2,12 @@ ancestor: null
 releases:
   0.1.0:
     changes:
-      release_summary: Initial release. Ansible support for Brocade / Ruckus FastIron
-        switches over ``network_cli``, tested against ICX 6650 switches running FastIron
-        08.0.30, with filters that check MCT cluster configurations for mistakes before
-        a failover exposes them.
+      release_summary: 'Initial release. Ansible support for Brocade / Ruckus FastIron
+        switches over ``network_cli``, tested against ICX 6650 and ICX 6610 switches
+        running FastIron 08.0.30: managing the switches'' SSH client public keys,
+        filters that bring a switch in line with a model of its VLANs, LAGs, interfaces
+        and MCT clusters, and filters that check MCT cluster configurations and live
+        state for mistakes and faults before a failover exposes them.'
     fragments:
     - 0.1.0.yml
     modules:
@@ -53,4 +55,4 @@ releases:
       - description: Parse a FastIron running configuration.
         name: fastiron_parse_config
         namespace: null
-    release_date: '2026-10-28'
+    release_date: '2026-11-03'
