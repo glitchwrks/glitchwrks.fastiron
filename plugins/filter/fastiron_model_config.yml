@@ -23,8 +23,9 @@ DOCUMENTATION:
         - The model, a dictionary with any of the keys below. Only the sections a model has are compared
           with a running configuration; the others are left alone.
         - C(default_vlan_id) is the switch's default VLAN, the VLAN that ports without an untagged VLAN belong
-          to. Leave it out, or set V(1), for the switch's own default. Leave the default VLAN's untagged ports out
-          of C(vlans), because the switch does not list them.
+          to. Leave it out, or set V(1), for the switch's own default. V(4094) is reserved by the switch, and a VLAN
+          already configured cannot become the default. Leave the default VLAN's untagged ports out of C(vlans),
+          because the switch does not list them.
         - C(system_max) maps system-max parameters, as the switch names them (such as V(vlan) or
           V(spanning-tree)), to positive numbers. Changes take effect only after the configuration is saved
           and the switch reloaded. List only values that differ from the switch's defaults, because the running

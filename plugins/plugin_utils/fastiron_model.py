@@ -179,6 +179,8 @@ def normalize_model(model):
         if not 1 <= default_vlan <= 4095:
             raise FastIronConfigError('default_vlan_id must be a VLAN id from 1 to 4095, got %r'
                                       % (model['default_vlan_id'],))
+        if default_vlan == 4094:
+            raise FastIronConfigError('default_vlan_id cannot be 4094, which the switch reserves')
         # A parsed configuration leaves default_vlan_id None for VLAN 1, so a
         # model says VLAN 1 the same way.
         result['default_vlan_id'] = None if default_vlan == DEFAULT_VLAN else default_vlan
@@ -504,7 +506,10 @@ _NO_INTERFACE = {'name': None, 'speed_duplex': None, 'dual_mode': False}
 def _default_vlan_fixable(current, want):
     """Whether config_commands() sets the default VLAN: only on a switch still
     on VLAN 1, and only when the new default VLAN isn't configured yet, as
-    FastIron won't make an existing VLAN the default."""
+    FastIron won't make an existing VLAN the default.
+
+    The change takes effect at once and bounces every switchport, including
+    the ICL and any in-band management path."""
     return current.get('default_vlan_id') is None and want['default_vlan_id'] not in current['vlans']
 
 
@@ -516,9 +521,12 @@ def _default_vlan_drift(current, want):
     fixable = _default_vlan_fixable(current, want)
     note = ''
     if current.get('default_vlan_id') is not None:
-        note = ' (changing it moves every port without an untagged VLAN, so it is done by hand)'
+        note = (' (changing it bounces every port and moves those without an untagged VLAN, so it is done by '
+                'hand)')
     elif not fixable:
         note = ' (VLAN %d is already configured, so it cannot become the default VLAN)' % wanted
+    if fixable:
+        note = ' (setting it bounces every port at once; set it from the console)'
     return [_finding('error', 'default_vlan_id', 'default-vlan-id', 'default VLAN is %d, should be %d%s'
                      % (have, wanted, note), fixable)]
 

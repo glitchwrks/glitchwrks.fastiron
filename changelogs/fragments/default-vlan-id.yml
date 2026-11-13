@@ -2,6 +2,7 @@ minor_changes:
   - fastiron_parse_config, fastiron_model_config, fastiron_config_drift and fastiron_config_commands - add the
     switch's default VLAN, set with ``default-vlan-id``, as ``default_vlan_id`` in a model. The command is
     generated only for a switch still using VLAN 1, when the new default VLAN is not configured yet; any other
-    change is reported for doing by hand.
+    change is reported for doing by hand. Setting it takes effect at once and bounces every switchport, so set it
+    from the console before a switch carries traffic.
   - fastiron_config_drift - no longer reports the switch's default VLAN as a VLAN that is not in the model,
     since it always exists.

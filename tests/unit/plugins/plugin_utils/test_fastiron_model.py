@@ -676,27 +676,28 @@ def with_default_vlan(text, vid):
 
 def test_parse_default_vlan(cs1a):
     assert parse_config(cs1a)['default_vlan_id'] is None
-    assert parse_config(with_default_vlan(cs1a, 4094))['default_vlan_id'] == 4094
+    assert parse_config(with_default_vlan(cs1a, 4093))['default_vlan_id'] == 4093
 
 
 def test_default_vlan_set_on_a_switch_still_on_vlan_1(cs1a, model):
-    model['default_vlan_id'] = 4094
+    model['default_vlan_id'] = 4093
     findings = config_drift(cs1a, model)
     assert rules(findings) == [('default_vlan_id', True)]
-    assert 'is 1, should be 4094' in findings[0]['message']
-    assert config_commands(cs1a, model) == ['default-vlan-id 4094']
+    assert 'is 1, should be 4093' in findings[0]['message']
+    assert 'from the console' in findings[0]['message']
+    assert config_commands(cs1a, model) == ['default-vlan-id 4093']
 
 
 def test_default_vlan_comes_first(model):
-    model['default_vlan_id'] = 4094
+    model['default_vlan_id'] = 4093
     model['system_max'] = {'vlan': 1024}
-    assert config_commands(EMPTY, model)[:2] == ['default-vlan-id 4094', 'system-max vlan 1024']
+    assert config_commands(EMPTY, model)[:2] == ['default-vlan-id 4093', 'system-max vlan 1024']
 
 
 def test_default_vlan_matching_is_clean(cs1a, model):
-    running = with_default_vlan(cs1a, 4094)
+    running = with_default_vlan(cs1a, 4093)
     model = model_of(running)
-    model['default_vlan_id'] = 4094
+    model['default_vlan_id'] = 4093
     assert config_drift(running, model) == []
     assert config_commands(running, model) == []
 
@@ -704,7 +705,7 @@ def test_default_vlan_matching_is_clean(cs1a, model):
 def test_changing_a_default_vlan_already_moved_is_only_reported(cs1a, model):
     running = with_default_vlan(cs1a, 4000)
     model = model_of(running)
-    model['default_vlan_id'] = 4094
+    model['default_vlan_id'] = 4093
     findings = config_drift(running, model)
     assert rules(findings) == [('default_vlan_id', False)]
     assert 'done by hand' in findings[0]['message']
@@ -712,7 +713,7 @@ def test_changing_a_default_vlan_already_moved_is_only_reported(cs1a, model):
 
 
 def test_moving_back_to_vlan_1_is_only_reported(cs1a):
-    running = with_default_vlan(cs1a, 4094)
+    running = with_default_vlan(cs1a, 4093)
     model = model_of(running)
     model['default_vlan_id'] = 1
     assert rules(config_drift(running, model)) == [('default_vlan_id', False)]
@@ -734,17 +735,17 @@ def test_default_vlan_1_in_the_model_matches_a_switch_on_vlan_1(cs1a, model):
 
 
 def test_default_vlan_not_in_the_model_is_left_alone(cs1a, model):
-    running = with_default_vlan(cs1a, 4094)
+    running = with_default_vlan(cs1a, 4093)
     assert config_drift(running, model_of(running)) == []
     model.pop('vlans')
     assert config_drift(running, model) == []
 
 
 def test_the_default_vlan_is_never_unmanaged(cs1a, model):
-    running = with_default_vlan(cs1a, 4094)
+    running = with_default_vlan(cs1a, 4093)
     model = model_of(running)
-    model['vlans'].pop(4094)
-    model['default_vlan_id'] = 4094
+    model['vlans'].pop(4093)
+    model['default_vlan_id'] = 4093
     assert config_drift(running, model) == []
     model['vlans'].pop(1)
     assert rules(config_drift(running, model)) == [('vlan_unmanaged', False)]
@@ -753,9 +754,10 @@ def test_the_default_vlan_is_never_unmanaged(cs1a, model):
 @pytest.mark.parametrize('model, message', [
     ({'default_vlan_id': 0}, 'from 1 to 4095'),
     ({'default_vlan_id': 4096}, 'from 1 to 4095'),
+    ({'default_vlan_id': 4094}, 'which the switch reserves'),
     ({'default_vlan_id': 'many'}, 'must be a number'),
     ({'default_vlan_id': True}, 'must be a number'),
-    ({'default_vlan_id': 4094, 'vlans': {4094: {'untagged': ['1/1/1']}}}, 'leave out its untagged ports'),
+    ({'default_vlan_id': 4093, 'vlans': {4093: {'untagged': ['1/1/1']}}}, 'leave out its untagged ports'),
 ])
 def test_invalid_default_vlan(model, message):
     with pytest.raises(FastIronConfigError, match=message):
