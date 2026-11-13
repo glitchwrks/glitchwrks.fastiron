@@ -668,15 +668,35 @@ def test_invalid_static_routes(model, routes, message):
 # The default VLAN
 
 
-def with_default_vlan(text, vid):
-    return text.replace('ver 08.0.30uT323\n', 'ver 08.0.30uT323\n!\ndefault-vlan-id %d\n' % vid, 1).replace(
-        'vlan 1 name DEFAULT-VLAN by port\n router-interface ve 1\n',
-        'vlan 1 by port\n router-interface ve 1\n!\nvlan %d name DEFAULT-VLAN by port\n' % vid, 1)
+def with_default_vlan(text, vid, line=False):
+    """The configuration after default-vlan-id: as an ICX 6650 on 08.0.30 shows it, the switch's
+    DEFAULT-VLAN moves to the new ID and VLAN 1 disappears. line adds an explicit default-vlan-id line."""
+    text = text.replace('vlan 1 name DEFAULT-VLAN by port\n router-interface ve 1\n!\n', '', 1)
+    text = text.replace('interface ve 1\n ip address 10.0.0.2 255.255.255.0\n!\n', '', 1)
+    text = text.replace('!\n!\n!\n!\nfpod-40g-enable', '!\nvlan %d name DEFAULT-VLAN by port\n!\n!\n!\nfpod-40g-enable' % vid, 1)
+    if line:
+        text = text.replace('ver 08.0.30uT323\n', 'ver 08.0.30uT323\n!\ndefault-vlan-id %d\n' % vid, 1)
+    assert 'vlan %d name DEFAULT-VLAN' % vid in text and 'vlan 1 ' not in text
+    return text
 
 
 def test_parse_default_vlan(cs1a):
     assert parse_config(cs1a)['default_vlan_id'] is None
-    assert parse_config(with_default_vlan(cs1a, 4093))['default_vlan_id'] == 4093
+    for line in (False, True):
+        parsed = parse_config(with_default_vlan(cs1a, 4093, line))
+        assert parsed['default_vlan_id'] == 4093
+        assert 1 not in parsed['vlans']
+
+
+def test_vlan_1_comes_back_as_an_ordinary_vlan(cs1a):
+    running = with_default_vlan(cs1a, 4093)
+    model = model_of(running)
+    model['default_vlan_id'] = 4093
+    model['vlans'][1] = {'name': 'ALB-LAN', 'tagged': ['1/1/7', '1/1/8'], 'untagged': ['1/1/3']}
+    findings = config_drift(running, model)
+    assert rules(findings) == [('vlan_missing', True)]
+    assert config_commands(running, model) == ['vlan 1 name ALB-LAN by port', ' tagged ethe 1/1/7 to 1/1/8',
+                                               ' untagged ethe 1/1/3']
 
 
 def test_default_vlan_set_on_a_switch_still_on_vlan_1(cs1a, model):
@@ -734,9 +754,10 @@ def test_default_vlan_1_in_the_model_matches_a_switch_on_vlan_1(cs1a, model):
     assert config_commands(cs1a, model) == []
 
 
-def test_default_vlan_not_in_the_model_is_left_alone(cs1a, model):
+def test_default_vlan_not_in_the_model_is_left_alone(cs1a):
     running = with_default_vlan(cs1a, 4093)
-    assert config_drift(running, model_of(running)) == []
+    model = model_of(running)
+    assert config_drift(running, model) == []
     model.pop('vlans')
     assert config_drift(running, model) == []
 
@@ -747,7 +768,7 @@ def test_the_default_vlan_is_never_unmanaged(cs1a, model):
     model['vlans'].pop(4093)
     model['default_vlan_id'] = 4093
     assert config_drift(running, model) == []
-    model['vlans'].pop(1)
+    model['vlans'].pop(1000)
     assert rules(config_drift(running, model)) == [('vlan_unmanaged', False)]
 
 

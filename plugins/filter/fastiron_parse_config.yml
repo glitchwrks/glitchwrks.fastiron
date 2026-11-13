@@ -36,8 +36,9 @@ RETURN:
       - The parsed configuration.
       - Keys C(vlans) and C(ve_addresses) are keyed by VLAN or VE number, C(lags) and
         C(clusters) by name.
-      - C(default_vlan_id) is the VLAN set with C(default-vlan-id), or V(null) when the switch uses its own
-        default, VLAN 1.
+      - C(default_vlan_id) is the switch's default VLAN, or V(null) when it is VLAN 1. It is read from a
+        C(default-vlan-id) line, or else from the VLAN the switch names C(DEFAULT-VLAN), which moves with the
+        setting.
       - C(system_max) maps the system-max parameters the configuration sets, such as C(vlan), to their
         values. Parameters left at their defaults are not listed, because the running configuration does not
         show them.
