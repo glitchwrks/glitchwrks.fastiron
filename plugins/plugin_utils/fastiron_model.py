@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Compare FastIron running configurations with a declared model.
 
-A model describes VLANs, LAGs, VE interface addresses, MCT clusters,
-system-max settings and Ethernet interface settings in the same shape parse_config() returns, so a model can be bootstrapped from a
+A model describes VLANs, LAGs, VE interface addresses, IPv4 static routes,
+MCT clusters, system-max settings and Ethernet interface settings in the same shape parse_config() returns, so a model can be bootstrapped from a
 parsed running configuration, and the MCT checks work on models too. Only the
 sections a model declares are compared; the others are left alone.
 
 Changes are additive: commands are generated only for what can be added
-safely (missing VLANs, ports, addresses, LAGs, clusters and clients, VLAN
+safely (missing VLANs, ports, addresses, static routes, LAGs, clusters and clients, VLAN
 names, deploying, port names, speed-duplex, dual-mode where none is set),
 plus system-max settings, which only take effect once the
 configuration is saved and the switch reloaded. Anything that needs removing something, or changing a LAG
@@ -31,9 +31,10 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
     FastIronConfigError,
     parse_config,
     parse_ports,
+    parse_static_route,
 )
 
-SECTIONS = ('system_max', 'interfaces', 'vlans', 'lags', 've_addresses', 'clusters')
+SECTIONS = ('system_max', 'interfaces', 'vlans', 'lags', 've_addresses', 'static_routes', 'clusters')
 # What config_removals() can remove, when asked to. Nothing is removed by
 # default.
 REMOVABLE = ('vlan_ports',)
@@ -99,6 +100,39 @@ def _address(value, what):
         raise FastIronConfigError('%s is not an address with a prefix length or netmask: %r' % (what, value))
 
 
+def _next_hop(value, what):
+    """A next hop: an IPv4 address, or an interface such as "ve 100" or "null0"."""
+    if isinstance(value, str):
+        route = parse_static_route(['0.0.0.0/0'] + value.split())
+        if route is not None and len(value.split()) <= 2:
+            hop = route[1]
+            kind, _sep, name = hop.partition(' ')
+            if hop == 'null0' or (kind == 've' and name.isdigit()) or \
+                    (kind == 'ethernet' and len(parse_ports([name])) == 1):
+                return hop
+            try:
+                return str(ipaddress.IPv4Address(hop))
+            except ValueError:
+                pass
+    raise FastIronConfigError('%s must be an IPv4 address, or an interface such as ve 100 or null0, got %r'
+                              % (what, value))
+
+
+def _static_route_destination(value):
+    words = str(value).replace('/', ' / ').split()
+    try:
+        if len(words) == 3 and words[1] == '/':
+            network = ipaddress.IPv4Network('%s/%s' % (words[0], words[2]))
+        elif len(words) == 2:
+            network = ipaddress.IPv4Network('%s/%s' % (words[0], words[1]))
+        else:
+            raise ValueError
+    except ValueError:
+        raise FastIronConfigError('static route destination must be an IPv4 network such as 0.0.0.0/0, '
+                                  'with no host bits set, got %r' % (value,))
+    return network.with_prefixlen
+
+
 def _interface(interface, what):
     """An interface's settings. Settings the model leaves out, or sets to None
     (as a parsed configuration does for what it doesn't set), are not compared,
@@ -133,7 +167,7 @@ def normalize_model(model):
     _require_mapping(model, 'the model')
     _check_keys(model, SECTIONS + ('hostname', 'version'), 'the model')
     result = {'hostname': model.get('hostname'), 'version': None, 'system_max': {},
-              'vlans': {}, 'lags': {}, 've_addresses': {}, 'clusters': {}, 'interfaces': {}}
+              'vlans': {}, 'lags': {}, 've_addresses': {}, 'static_routes': {}, 'clusters': {}, 'interfaces': {}}
     managed = [s for s in SECTIONS if s in model]
 
     for key, value in _require_mapping(model.get('system_max') or {}, 'system_max').items():
@@ -206,6 +240,22 @@ def normalize_model(model):
         if isinstance(addresses, str) or not is_sequence(addresses):
             addresses = [addresses]
         result['ve_addresses'][ve] = [_address(a, 'VE %d address' % ve).with_netmask for a in addresses]
+
+    for key, hops in _require_mapping(model.get('static_routes') or {}, 'static_routes').items():
+        destination = _static_route_destination(key)
+        if destination in result['static_routes']:
+            raise FastIronConfigError('static route %s is listed more than once' % destination)
+        if isinstance(hops, str) or not is_sequence(hops):
+            hops = [hops]
+        what = 'static route %s next hop' % destination
+        normalized = []
+        for hop in hops:
+            hop = _next_hop(hop, what)
+            if hop not in normalized:
+                normalized.append(hop)
+        if not normalized:
+            raise FastIronConfigError('static route %s needs a next hop' % destination)
+        result['static_routes'][destination] = normalized
 
     for name, cluster in _require_mapping(model.get('clusters') or {}, 'clusters').items():
         what = 'cluster %s' % name
@@ -391,6 +441,9 @@ def config_drift(running, model, remove=None, protected_vlans=None):
                 findings.append(_finding('error', 've_address_extra', obj, 've %d has extra address(es) %s'
                                          % (ve, ', '.join(extra)), False))
 
+    if 'static_routes' in managed:
+        findings.extend(_static_route_drift(current, want))
+
     if 'lags' in managed:
         for name, lag in sorted(want['lags'].items()):
             obj = 'lag %s' % name
@@ -423,6 +476,33 @@ def config_drift(running, model, remove=None, protected_vlans=None):
 
 
 _NO_INTERFACE = {'name': None, 'speed_duplex': None, 'dual_mode': False}
+
+
+def _route_key(destination):
+    network = ipaddress.IPv4Network(destination)
+    return (int(network.network_address), network.prefixlen)
+
+
+def _static_route_drift(current, want):
+    findings = []
+    have_routes = current.get('static_routes', {})
+    for destination, hops in sorted(want['static_routes'].items(), key=lambda item: _route_key(item[0])):
+        obj = 'ip route %s' % destination
+        have = have_routes.get(destination, [])
+        missing = [h for h in hops if h not in have]
+        extra = [h for h in have if h not in hops]
+        if missing:
+            findings.append(_finding('error', 'static_route_missing', obj, 'route %s is missing next hop(s) %s'
+                                     % (destination, ', '.join(missing)), True))
+        if extra:
+            # Removing a next hop, or swapping one for another, can cut the
+            # switch off from whoever is managing it, so it's done by hand.
+            findings.append(_finding('error', 'static_route_extra', obj, 'route %s has extra next hop(s) %s'
+                                     % (destination, ', '.join(extra)), False))
+    for destination in sorted(set(have_routes) - set(want['static_routes']), key=_route_key):
+        findings.append(_finding('warning', 'static_route_unmanaged', 'ip route %s' % destination,
+                                 'route %s is not in the model' % destination, False))
+    return findings
 
 
 def _dual_mode_text(mode):
@@ -582,7 +662,8 @@ def config_commands(running, model):
     Returns configuration lines, nested blocks indented by one space, in the
     order they can be applied: system-max settings, port names and speed-duplex
     (ports must match before they are put in a LAG), LAGs, VLANs, dual-mode
-    (which needs the port tagged in a VLAN), VE addresses, clusters. A system-max setting only takes effect once the configuration is
+    (which needs the port tagged in a VLAN), VE addresses, static routes
+    (whose next hops are usually on a VE's subnet), clusters. A system-max setting only takes effect once the configuration is
     saved and the switch reloaded, which is left to the caller. Drift that
     needs removing something or changing a LAG or cluster in place gets no
     commands; config_drift() reports it.
@@ -643,6 +724,12 @@ def config_commands(running, model):
             if missing:
                 lines.append('interface ve %d' % ve)
                 lines.extend(' ip address %s' % _netmask_form(a) for a in missing)
+
+    if 'static_routes' in managed:
+        have_routes = current.get('static_routes', {})
+        for destination, hops in sorted(want['static_routes'].items(), key=lambda item: _route_key(item[0])):
+            lines.extend('ip route %s %s' % (destination, hop)
+                         for hop in hops if hop not in have_routes.get(destination, []))
 
     if 'clusters' in managed:
         for name, cluster in sorted(want['clusters'].items()):

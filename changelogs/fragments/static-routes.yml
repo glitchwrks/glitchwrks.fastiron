@@ -1,0 +1,4 @@
+minor_changes:
+  - fastiron_parse_config, fastiron_model_config, fastiron_config_drift and fastiron_config_commands - add IPv4
+    static routes, including the default route, as the ``static_routes`` section of a model. Missing routes are
+    added; extra next hops are reported for removal by hand.
