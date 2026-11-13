@@ -16,7 +16,6 @@ _PORT_RE = re.compile(r'^\d+(?:/\d+)*$')
 # A deployed LAG lists its ports' names: port-name ix0.gw2.bee ethernet 1/3/5
 _LAG_PORT_NAME_RE = re.compile(r'^port-name\s+("[^"]*"|\S+)\s+ethe\S*\s+(\S+)\s*$')
 _NO_INTERFACE = {'name': None, 'speed_duplex': None, 'dual_mode': False}
-DEFAULT_VLAN_NAME = 'DEFAULT-VLAN'
 
 
 class FastIronConfigError(Exception):
@@ -84,9 +83,9 @@ def parse_config(text):
     speed-duplex and dual-mode settings of Ethernet interfaces. Anything else
     is ignored.
 
-    default_vlan_id is the switch's default VLAN when it isn't VLAN 1, else
-    None. It comes from a default-vlan-id line, or else from the VLAN the
-    switch names DEFAULT-VLAN: the switch moves that name with the setting.
+    default_vlan_id is the ID set with default-vlan-id, or None when the
+    switch uses the default, VLAN 1: the running configuration only shows the
+    setting when it is changed.
 
     system_max maps the system-max parameters the configuration sets, such as
     vlan, to their values. A parameter left at its default is not listed: the
@@ -167,12 +166,6 @@ def parse_config(text):
                     hops.append(route[1])
         elif words[0] == 'cluster' and len(words) > 1:
             result['clusters'][words[1]] = _parse_cluster(words, children)
-    if result['default_vlan_id'] is None:
-        # The switch names its default VLAN DEFAULT-VLAN, and moves the name
-        # along with default-vlan-id.
-        for vid, vlan in result['vlans'].items():
-            if vlan['name'] == DEFAULT_VLAN_NAME and vid != 1:
-                result['default_vlan_id'] = vid
     for port, name in lag_port_names.items():
         result['interfaces'].setdefault(port, dict(_NO_INTERFACE))['name'] = name
     for lag in result['lags'].values():

@@ -668,24 +668,22 @@ def test_invalid_static_routes(model, routes, message):
 # The default VLAN
 
 
-def with_default_vlan(text, vid, line=False):
-    """The configuration after default-vlan-id: as an ICX 6650 on 08.0.30 shows it, the switch's
-    DEFAULT-VLAN moves to the new ID and VLAN 1 disappears. line adds an explicit default-vlan-id line."""
+def with_default_vlan(text, vid):
+    """The configuration after default-vlan-id, as an ICX 6650 on 08.0.30 shows it: the
+    default-vlan-id line, the switch's DEFAULT-VLAN moved to the new ID, and VLAN 1 gone."""
     text = text.replace('vlan 1 name DEFAULT-VLAN by port\n router-interface ve 1\n!\n', '', 1)
     text = text.replace('interface ve 1\n ip address 10.0.0.2 255.255.255.0\n!\n', '', 1)
     text = text.replace('!\n!\n!\n!\nfpod-40g-enable', '!\nvlan %d name DEFAULT-VLAN by port\n!\n!\n!\nfpod-40g-enable' % vid, 1)
-    if line:
-        text = text.replace('ver 08.0.30uT323\n', 'ver 08.0.30uT323\n!\ndefault-vlan-id %d\n' % vid, 1)
+    text = text.replace('hostname cs1a', 'default-vlan-id %d\nhostname cs1a' % vid, 1)
     assert 'vlan %d name DEFAULT-VLAN' % vid in text and 'vlan 1 ' not in text
     return text
 
 
 def test_parse_default_vlan(cs1a):
     assert parse_config(cs1a)['default_vlan_id'] is None
-    for line in (False, True):
-        parsed = parse_config(with_default_vlan(cs1a, 4093, line))
-        assert parsed['default_vlan_id'] == 4093
-        assert 1 not in parsed['vlans']
+    parsed = parse_config(with_default_vlan(cs1a, 4093))
+    assert parsed['default_vlan_id'] == 4093
+    assert 1 not in parsed['vlans']
 
 
 def test_vlan_1_comes_back_as_an_ordinary_vlan(cs1a):
