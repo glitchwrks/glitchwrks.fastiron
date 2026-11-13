@@ -580,3 +580,86 @@ def test_names_set_before_a_new_lag_read_back_after_it_is_deployed():
     commands = config_commands(EMPTY, GW2_MODEL)
     assert commands[:2] == ['interface ethernet 1/3/5', ' port-name ix0.gw2.bee']
     assert config_drift(DEPLOYED_LAG, GW2_MODEL) == []
+
+
+# IPv4 static routes
+
+
+def with_routes(text, *routes):
+    return text.replace('\nend', '\n%s\n!\nend' % '\n'.join(routes), 1) if '\nend' in text else \
+        text + '\n%s\n' % '\n'.join(routes)
+
+
+@pytest.mark.parametrize('line, expected', [
+    ('ip route 0.0.0.0/0 10.109.100.1', {'0.0.0.0/0': ['10.109.100.1']}),
+    ('ip route 0.0.0.0 0.0.0.0 10.109.100.1', {'0.0.0.0/0': ['10.109.100.1']}),
+    ('ip route 172.16.4.0/24 10.0.0.1 5 distance 10', {'172.16.4.0/24': ['10.0.0.1']}),
+    ('ip route 10.0.0.0/8 null0', {'10.0.0.0/8': ['null0']}),
+    ('ip route 10.0.0.0/8 ve 100', {'10.0.0.0/8': ['ve 100']}),
+    ('ip route 10.0.0.0/8 ethe 1/1/2', {'10.0.0.0/8': ['ethernet 1/1/2']}),
+    ('ip route vrf red 0.0.0.0/0 10.0.0.1', {}),
+    ('ip route-only nonsense', {}),
+])
+def test_parse_static_routes(cs1a, line, expected):
+    assert parse_config(with_routes(cs1a, line))['static_routes'] == expected
+
+
+def test_parse_equal_cost_routes_keep_their_order(cs1a):
+    running = with_routes(cs1a, 'ip route 0.0.0.0/0 10.0.0.9', 'ip route 0.0.0.0/0 10.0.0.1')
+    assert parse_config(running)['static_routes'] == {'0.0.0.0/0': ['10.0.0.9', '10.0.0.1']}
+
+
+def test_missing_default_route_is_added(cs1a, model):
+    model['static_routes'] = {'0.0.0.0/0': '10.0.0.1'}
+    assert rules(config_drift(cs1a, model)) == [('static_route_missing', True)]
+    assert config_commands(cs1a, model) == ['ip route 0.0.0.0/0 10.0.0.1']
+
+
+def test_matching_default_route_is_clean(cs1a, model):
+    model['static_routes'] = {'0.0.0.0 0.0.0.0': ['10.0.0.1']}
+    running = with_routes(cs1a, 'ip route 0.0.0.0/0 10.0.0.1')
+    assert config_drift(running, model) == []
+    assert config_commands(running, model) == []
+
+
+def test_changing_the_default_route_adds_the_new_one_and_reports_the_old(cs1a, model):
+    model['static_routes'] = {'0.0.0.0/0': ['10.109.100.1']}
+    running = with_routes(cs1a, 'ip route 0.0.0.0/0 10.0.0.1')
+    assert rules(config_drift(running, model)) == [('static_route_extra', False), ('static_route_missing', True)]
+    assert config_commands(running, model) == ['ip route 0.0.0.0/0 10.109.100.1']
+
+
+def test_routes_not_in_the_model(cs1a, model):
+    running = with_routes(cs1a, 'ip route 0.0.0.0/0 10.0.0.1')
+    assert config_drift(running, model) == []
+    model['static_routes'] = {}
+    assert rules(config_drift(running, model)) == [('static_route_unmanaged', False)]
+    assert config_commands(running, model) == []
+
+
+def test_routes_come_after_ve_addresses_and_read_back(model):
+    model['static_routes'] = {'0.0.0.0/0': '10.0.0.1', '172.16.0.0/30': ['ve 3000', '10.0.1.3']}
+    commands = config_commands(EMPTY, model)
+    ve = commands.index('interface ve 3000')
+    route = commands.index('ip route 0.0.0.0/0 10.0.0.1')
+    assert ve < route < commands.index('cluster ALB-CORE 4000')
+    assert commands[route:route + 3] == ['ip route 0.0.0.0/0 10.0.0.1', 'ip route 172.16.0.0/30 ve 3000',
+                                         'ip route 172.16.0.0/30 10.0.1.3']
+    rebuilt = 'Current configuration:\n!\n%s\nend\n' % '\n'.join(commands)
+    assert config_drift(rebuilt, model) == []
+
+
+@pytest.mark.parametrize('routes, message', [
+    ({'default': '10.0.0.1'}, 'must be an IPv4 network'),
+    ({'10.0.0.1/24': '10.0.0.254'}, 'no host bits set'),
+    ({'0.0.0.0/0': 'gateway'}, 'must be an IPv4 address, or an interface'),
+    ({'0.0.0.0/0': 've x'}, 'must be an IPv4 address, or an interface'),
+    ({'0.0.0.0/0': '2001:db8::1'}, 'must be an IPv4 address, or an interface'),
+    ({'0.0.0.0/0': []}, 'needs a next hop'),
+    ({'0.0.0.0/0': '10.0.0.1', '0.0.0.0 0.0.0.0': '10.0.0.2'}, 'listed more than once'),
+    (['0.0.0.0/0'], 'static_routes must be a dictionary'),
+])
+def test_invalid_static_routes(model, routes, message):
+    model['static_routes'] = routes
+    with pytest.raises(FastIronConfigError, match=message):
+        normalize_model(model)

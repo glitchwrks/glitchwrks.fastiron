@@ -14,10 +14,10 @@ CLI are likely to work, but have not been tested.
 | `glitchwrks.fastiron.fastiron` | cliconf | Reads and changes configuration for `ansible.netcommon.cli_command` and `ansible.netcommon.cli_config` |
 | `glitchwrks.fastiron.fastiron` | terminal | Recognizes FastIron prompts and errors, turns off paging, and enters privileged EXEC mode |
 | `glitchwrks.fastiron.fastiron_ssh_keys` | module | Sets the list of public keys the switch accepts for SSH logins |
-| `glitchwrks.fastiron.fastiron_parse_config` | filter | Parses a running configuration into VLANs, LAGs, VE addresses and MCT clusters |
+| `glitchwrks.fastiron.fastiron_parse_config` | filter | Parses a running configuration into VLANs, LAGs, VE addresses, static routes and MCT clusters |
 | `glitchwrks.fastiron.fastiron_mct_audit` | filter | Checks one switch's MCT clusters against the Ruckus MCT design rules |
 | `glitchwrks.fastiron.fastiron_mct_compare` | filter | Checks that two MCT peers agree |
-| `glitchwrks.fastiron.fastiron_model_config` | filter | Validates a model of a switch's VLANs, LAGs, VE addresses and MCT clusters |
+| `glitchwrks.fastiron.fastiron_model_config` | filter | Validates a model of a switch's VLANs, LAGs, VE addresses, static routes and MCT clusters |
 | `glitchwrks.fastiron.fastiron_config_drift` | filter | Reports how a running configuration differs from a model |
 | `glitchwrks.fastiron.fastiron_config_commands` | filter | Generates the commands that add what a switch is missing from a model |
 | `glitchwrks.fastiron.fastiron_config_removals` | filter | Generates the commands that remove ports from VLANs that a model doesn't list |
@@ -226,7 +226,7 @@ warnings rather than passed silently.
 
 ### Managing VLANs, LAGs and MCT from a model
 
-A model describes a switch's VLANs, LAGs, VE addresses and MCT clusters, in the same shape
+A model describes a switch's VLANs, LAGs, VE addresses, IPv4 static routes and MCT clusters, in the same shape
 `fastiron_parse_config` returns, so a parsed running configuration is a valid starting point.
 `ansible-doc -t filter glitchwrks.fastiron.fastiron_model_config` describes the format.
 
@@ -253,9 +253,11 @@ A model describes a switch's VLANs, LAGs, VE addresses and MCT clusters, in the 
     msg: "{{ running.stdout | glitchwrks.fastiron.fastiron_config_drift(model) | map(attribute='message') }}"
 ```
 
-Changes are additive: missing VLANs, ports, VE addresses, LAGs, clusters and clients are added,
+Changes are additive: missing VLANs, ports, VE addresses, static routes, LAGs, clusters and clients are added,
 and anything undeployed is deployed. Removing something, or changing a LAG or cluster in place,
 usually means undeploying it first, so those differences are only reported, for you to fix by hand.
+The same goes for static routes: pointing the default route at a new gateway adds the new route, and the
+old one is reported for you to remove once the switch is reachable through the new one.
 
 `fastiron_config_removals` can also remove ports from the model's VLANs that the model doesn't
 list for them. Send its lines after the additions, so a port's replacement is in place first.

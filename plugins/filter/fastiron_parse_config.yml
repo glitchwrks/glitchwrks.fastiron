@@ -9,7 +9,8 @@ DOCUMENTATION:
   short_description: Parse a FastIron running configuration
   description:
     - Parses the output of C(show running-config) from a FastIron switch into the hostname,
-      software version, system-max settings, VLANs, LAGs, VE addresses and MCT clusters it defines, and
+      software version, system-max settings, VLANs, LAGs, VE addresses, IPv4 static routes and MCT clusters it
+      defines, and
       the port name, speed-duplex and dual-mode settings of its Ethernet interfaces.
     - Port ranges such as C(ethe 1/1/7 to 1/1/8) are expanded to individual ports.
     - A configuration that was already parsed is returned unchanged.
@@ -42,6 +43,10 @@ RETURN:
         V(null) when not set) and C(dual_mode) (V(false), V(true) for the default VLAN, or a VLAN id).
         A deployed LAG's port names are read from the LAG's C(port-name NAME ethernet PORT) lines, and its
         secondary ports, which have no interface block of their own, get the primary port's C(speed_duplex).
+      - C(static_routes) maps each IPv4 static route's destination, such as V(0.0.0.0/0), to its next hops in
+        the order the configuration lists them. A next hop is an address, or an interface such as V(ve 100),
+        V(ethernet 1/1/2) or V(null0). Metrics, distances, names and tags are not kept, and routes in VRFs are
+        skipped.
       - Each cluster has C(id), C(rbridge_id), C(session_vlan), C(keep_alive_vlan), C(icl),
         C(peers), C(deployed) and C(clients).
     type: dict

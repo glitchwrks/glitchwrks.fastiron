@@ -9,7 +9,8 @@ DOCUMENTATION:
   short_description: Generate the FastIron commands that bring a switch closer to a model
   description:
     - Returns the configuration lines that add what a switch is missing from a model, such as VLANs, tagged
-      and untagged ports, router interfaces, VLAN names, VE addresses, LAGs, MCT clusters and their clients,
+      and untagged ports, router interfaces, VLAN names, VE addresses, IPv4 static routes, LAGs, MCT clusters
+      and their clients,
       and deploying them, system-max settings that differ from the model, and port names, speed-duplex
       settings and dual-mode on ports where it is off. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
     - Nothing is ever removed, and LAGs and clusters that exist are not changed apart from being deployed.
@@ -17,7 +18,10 @@ DOCUMENTATION:
       P(glitchwrks.fastiron.fastiron_config_drift#filter).
     - The lines are nested by indenting one space, in the order they can be applied (system-max settings,
       port names and speed-duplex, because a LAG's ports must match before it is deployed, LAGs, VLANs,
-      dual-mode, because it needs the port tagged in a VLAN, VE addresses, clusters), and written the way the switch shows them.
+      dual-mode, because it needs the port tagged in a VLAN, VE addresses, static routes, clusters), and written the way
+      the switch shows them.
+    - A static route is only ever added. Moving a route, such as the default route, to a new next hop adds the new
+      route alongside the old one, so both are used until the old one is removed by hand.
     - A system-max setting only takes effect after the configuration is saved and the switch reloaded.
       Reloading is left to the caller; until then the switch keeps its old limits. Push them with
       M(ansible.netcommon.cli_config) and O(ansible.netcommon.cli_config#module:diff_match=none), so they

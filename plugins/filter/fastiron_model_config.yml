@@ -8,8 +8,8 @@ DOCUMENTATION:
   version_added: 0.1.0
   short_description: Validate a FastIron configuration model
   description:
-    - Validates a model of a switch's system-max settings, VLANs, LAGs, VE interface addresses, MCT
-      clusters and Ethernet interface settings, and returns it in
+    - Validates a model of a switch's system-max settings, VLANs, LAGs, VE interface addresses, IPv4 static
+      routes, MCT clusters and Ethernet interface settings, and returns it in
       the shape P(glitchwrks.fastiron.fastiron_parse_config#filter) returns, with defaults filled in.
     - The result can be checked with P(glitchwrks.fastiron.fastiron_mct_audit#filter) and
       P(glitchwrks.fastiron.fastiron_mct_compare#filter) before any switch is changed.
@@ -39,6 +39,10 @@ DOCUMENTATION:
           (defaults to the first port) and C(deployed) (defaults to V(true)).
         - C(ve_addresses) maps VE numbers to lists of addresses, with a prefix length or a netmask, such as
           V(10.0.1.2/24).
+        - C(static_routes) maps IPv4 destinations, such as V(0.0.0.0/0) for the default route or
+          V(172.16.4.0/24), to a next hop or a list of them (equal-cost routes). A next hop is an IPv4 address,
+          or an interface such as V(ve 100), V(ethernet 1/1/2) or V(null0). Metrics, distances, names and tags
+          are not compared. Routes on the switch's management port and in VRFs are not covered.
         - C(clusters) maps MCT cluster names to C(id), C(rbridge_id), C(session_vlan), C(keep_alive_vlan),
           C(icl) (C(name) and C(ports)), C(peers) (a list of C(address), C(rbridge_id) and C(icl), which
           defaults to the cluster's ICL), C(deployed) (defaults to V(true)) and C(clients). C(clients) maps
@@ -71,7 +75,10 @@ EXAMPLES: |
   # fastiron_model | ansible.builtin.combine(fastiron_host_model, recursive=true)
   fastiron_host_model:
     ve_addresses:
+      100: [10.109.100.24/24]
       3000: [10.0.1.2/24]
+    static_routes:
+      0.0.0.0/0: 10.109.100.1
     clusters:
       ALB-CORE:
         rbridge_id: 2

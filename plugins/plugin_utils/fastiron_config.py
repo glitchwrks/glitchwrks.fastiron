@@ -96,9 +96,15 @@ def parse_config(text):
     blocks; they run at the primary port's speed. Those names are read from
     the LAG, and the secondary ports get the primary port's speed_duplex, so
     a port's settings read the same before and after it joins a LAG.
+
+    static_routes maps each IPv4 static route's destination, written as
+    a.b.c.d/len (0.0.0.0/0 for the default route), to its next hops, in the
+    order the configuration lists them. A next hop is an address, or the
+    interface the route points at, such as "ve 100" or "null0". Metric,
+    distance, name and tag are not kept. Routes in a VRF are skipped.
     """
     result = {'hostname': None, 'version': None, 'system_max': {}, 'vlans': {}, 'lags': {}, 've_addresses': {},
-              'clusters': {}, 'interfaces': {}}
+              'static_routes': {}, 'clusters': {}, 'interfaces': {}}
 
     lag_port_names = {}
     for head, children in _blocks(text):
@@ -146,6 +152,12 @@ def parse_config(text):
                 if cw[:2] == ['ip', 'address'] and len(cw) > 2:
                     address = cw[2] if '/' in cw[2] or len(cw) < 4 else '%s/%s' % (cw[2], cw[3])
                     result['ve_addresses'].setdefault(_int(words[2]), []).append(address)
+        elif words[:2] == ['ip', 'route']:
+            route = parse_static_route(words[2:])
+            if route is not None:
+                hops = result['static_routes'].setdefault(route[0], [])
+                if route[1] not in hops:
+                    hops.append(route[1])
         elif words[0] == 'cluster' and len(words) > 1:
             result['clusters'][words[1]] = _parse_cluster(words, children)
     for port, name in lag_port_names.items():
@@ -159,6 +171,34 @@ def parse_config(text):
             if port != lag['primary_port'] and interface['speed_duplex'] is None:
                 interface['speed_duplex'] = primary['speed_duplex']
     return result
+
+
+def parse_static_route(words):
+    """Parse the words after "ip route" into (destination, next hop).
+
+    The destination may be a.b.c.d/len or an address and a netmask. Returns
+    None for routes this doesn't cover, such as routes in a VRF.
+    """
+    if not words or words[0] == 'vrf':
+        return None
+    try:
+        if '/' in words[0]:
+            destination, rest = ipaddress.IPv4Network(words[0], strict=False), words[1:]
+        elif len(words) > 1:
+            destination, rest = ipaddress.IPv4Network('%s/%s' % (words[0], words[1]), strict=False), words[2:]
+        else:
+            return None
+    except ValueError:
+        return None
+    if not rest:
+        return None
+    if rest[0].startswith('ethe') or rest[0] == 've':
+        if len(rest) < 2:
+            return None
+        hop = '%s %s' % ('ve' if rest[0] == 've' else 'ethernet', rest[1])
+    else:
+        hop = rest[0]
+    return destination.with_prefixlen, hop
 
 
 def _parse_interface(interface, children):

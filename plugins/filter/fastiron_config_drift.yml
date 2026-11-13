@@ -9,11 +9,14 @@ DOCUMENTATION:
   short_description: Compare a FastIron running configuration with a model
   description:
     - Reports how a switch's running configuration differs from a model of its system-max settings, VLANs,
-      LAGs, VE interface addresses, MCT clusters and Ethernet interface settings. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
+      LAGs, VE interface addresses, IPv4 static routes, MCT clusters and Ethernet interface settings. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
     - Only the sections the model has are compared. Within them, VLANs, LAGs, clusters and cluster clients
       the switch has but the model does not are reported as warnings, as are system-max parameters the
-      switch sets but the model does not. Only the interfaces, and the settings of each, that the model
-      lists are compared.
+      switch sets but the model does not, and static routes to destinations the model does not list. Only the
+      interfaces, and the settings of each, that the model lists are compared.
+    - A static route's missing next hops are fixable. Extra next hops, including the old one when a route
+      such as the default route moves to a new next hop, are reported but not fixable, because removing a
+      route can cut the switch off from whoever is managing it, so it is done by hand.
     - Turning dual-mode off, or moving it to another VLAN, is reported but not fixable, because it changes which VLAN
       the port's untagged traffic lands in, so it is done by hand.
     - System-max settings are compared with the running configuration, which shows the configured value
