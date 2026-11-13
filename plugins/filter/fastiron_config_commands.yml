@@ -8,7 +8,8 @@ DOCUMENTATION:
   version_added: 0.1.0
   short_description: Generate the FastIron commands that bring a switch closer to a model
   description:
-    - Returns the configuration lines that add what a switch is missing from a model, such as VLANs, tagged
+    - Returns the configuration lines that add what a switch is missing from a model, such as the default VLAN on
+      a switch still using VLAN 1, VLANs, tagged
       and untagged ports, router interfaces, VLAN names, VE addresses, IPv4 static routes, LAGs, MCT clusters
       and their clients,
       and deploying them, system-max settings that differ from the model, and port names, speed-duplex
@@ -16,10 +17,15 @@ DOCUMENTATION:
     - Nothing is ever removed, and LAGs and clusters that exist are not changed apart from being deployed.
       Those differences, which usually need something undeployed first, are only reported by
       P(glitchwrks.fastiron.fastiron_config_drift#filter).
-    - The lines are nested by indenting one space, in the order they can be applied (system-max settings,
+    - The lines are nested by indenting one space, in the order they can be applied (the default VLAN, system-max
+      settings,
       port names and speed-duplex, because a LAG's ports must match before it is deployed, LAGs, VLANs,
       dual-mode, because it needs the port tagged in a VLAN, VE addresses, static routes, clusters), and written the way
       the switch shows them.
+    - Setting the default VLAN takes effect at once and bounces every switchport, including MCT ICL links and
+      the session Ansible may be connected over. Leave V(default_vlan_id) out of the model used for a run against
+      a switch carrying traffic, or set it from the console first; it is generated only on a switch still using
+      VLAN 1.
     - A static route is only ever added. Moving a route, such as the default route, to a new next hop adds the new
       route alongside the old one, so both are used until the old one is removed by hand.
     - A system-max setting only takes effect after the configuration is saved and the switch reloaded.

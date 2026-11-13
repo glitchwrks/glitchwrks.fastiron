@@ -28,15 +28,16 @@ def test_model_filters_take_text_or_parsed_configurations(cs1a):
     parsed = FILTERS['fastiron_parse_config'](cs1a)
     for config in (cs1a, parsed):
         drift = FILTERS['fastiron_config_drift'](config, model)
-        assert sorted(f['rule'] for f in drift) == ['vlan_unmanaged', 'vlan_unmanaged', 'vlan_unmanaged']
+        # VLAN 1, the default VLAN, always exists, so it isn't reported.
+        assert sorted(f['rule'] for f in drift) == ['vlan_unmanaged', 'vlan_unmanaged']
         assert FILTERS['fastiron_config_commands'](config, model) == []
 
 
 def test_model_config_returns_the_parsed_shape():
     config = FILTERS['fastiron_model_config']({'vlans': {10: {}}})
     assert config['vlans'] == {10: {'name': None, 'tagged': [], 'untagged': [], 'router_interface': None}}
-    assert set(config) == {'hostname', 'version', 'system_max', 'vlans', 'lags', 've_addresses', 'static_routes',
-                           'clusters', 'interfaces'}
+    assert set(config) == {'hostname', 'version', 'default_vlan_id', 'system_max', 'vlans', 'lags', 've_addresses',
+                           'static_routes', 'clusters', 'interfaces'}
 
 
 @pytest.mark.parametrize('name, args', [

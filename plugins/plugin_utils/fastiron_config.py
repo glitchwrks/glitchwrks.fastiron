@@ -83,6 +83,10 @@ def parse_config(text):
     speed-duplex and dual-mode settings of Ethernet interfaces. Anything else
     is ignored.
 
+    default_vlan_id is the ID set with default-vlan-id, or None when the
+    switch uses the default, VLAN 1: the running configuration only shows the
+    setting when it is changed.
+
     system_max maps the system-max parameters the configuration sets, such as
     vlan, to their values. A parameter left at its default is not listed: the
     running configuration doesn't show defaults.
@@ -103,8 +107,8 @@ def parse_config(text):
     interface the route points at, such as "ve 100" or "null0". Metric,
     distance, name and tag are not kept. Routes in a VRF are skipped.
     """
-    result = {'hostname': None, 'version': None, 'system_max': {}, 'vlans': {}, 'lags': {}, 've_addresses': {},
-              'static_routes': {}, 'clusters': {}, 'interfaces': {}}
+    result = {'hostname': None, 'version': None, 'default_vlan_id': None, 'system_max': {}, 'vlans': {}, 'lags': {},
+              've_addresses': {}, 'static_routes': {}, 'clusters': {}, 'interfaces': {}}
 
     lag_port_names = {}
     for head, children in _blocks(text):
@@ -113,6 +117,8 @@ def parse_config(text):
             result['hostname'] = words[1]
         elif words[0] == 'ver' and len(words) > 1:
             result['version'] = words[1]
+        elif words[0] == 'default-vlan-id' and len(words) > 1 and _int(words[1]) is not None:
+            result['default_vlan_id'] = int(words[1])
         elif words[0] == 'system-max' and len(words) > 2 and _int(words[2]) is not None:
             result['system_max'][words[1]] = int(words[2])
         elif words[0] == 'vlan' and len(words) > 1 and _int(words[1]) is not None:

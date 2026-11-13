@@ -254,6 +254,7 @@ A model describes a switch's VLANs, LAGs, VE addresses, IPv4 static routes and M
 ```
 
 Changes are additive: missing VLANs, ports, VE addresses, static routes, LAGs, clusters and clients are added,
+the default VLAN is set on a switch still using VLAN 1,
 and anything undeployed is deployed. Removing something, or changing a LAG or cluster in place,
 usually means undeploying it first, so those differences are only reported, for you to fix by hand.
 The same goes for static routes: pointing the default route at a new gateway adds the new route, and the

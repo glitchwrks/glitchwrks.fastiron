@@ -13,7 +13,8 @@ Changes are additive: commands are generated only for what can be added
 safely (missing VLANs, ports, addresses, static routes, LAGs, clusters and clients, VLAN
 names, deploying, port names, speed-duplex, dual-mode where none is set),
 plus system-max settings, which only take effect once the
-configuration is saved and the switch reloaded. Anything that needs removing something, or changing a LAG
+configuration is saved and the switch reloaded, and the default VLAN on a
+switch still using VLAN 1. Anything that needs removing something, or changing a LAG
 or cluster in place, is reported as drift to fix by hand.
 
 Runs on the controller.
@@ -34,7 +35,10 @@ from ansible_collections.glitchwrks.fastiron.plugins.plugin_utils.fastiron_confi
     parse_static_route,
 )
 
-SECTIONS = ('system_max', 'interfaces', 'vlans', 'lags', 've_addresses', 'static_routes', 'clusters')
+SECTIONS = ('default_vlan_id', 'system_max', 'interfaces', 'vlans', 'lags', 've_addresses', 'static_routes',
+            'clusters')
+# The default VLAN when default-vlan-id is not set.
+DEFAULT_VLAN = 1
 # What config_removals() can remove, when asked to. Nothing is removed by
 # default.
 REMOVABLE = ('vlan_ports',)
@@ -166,9 +170,22 @@ def normalize_model(model):
     """
     _require_mapping(model, 'the model')
     _check_keys(model, SECTIONS + ('hostname', 'version'), 'the model')
-    result = {'hostname': model.get('hostname'), 'version': None, 'system_max': {},
+    result = {'hostname': model.get('hostname'), 'version': None, 'default_vlan_id': None, 'system_max': {},
               'vlans': {}, 'lags': {}, 've_addresses': {}, 'static_routes': {}, 'clusters': {}, 'interfaces': {}}
     managed = [s for s in SECTIONS if s in model]
+
+    if model.get('default_vlan_id') is not None:
+        default_vlan = _number(model['default_vlan_id'], 'default_vlan_id')
+        if not 1 <= default_vlan <= 4095:
+            raise FastIronConfigError('default_vlan_id must be a VLAN id from 1 to 4095, got %r'
+                                      % (model['default_vlan_id'],))
+        if default_vlan == 4094:
+            raise FastIronConfigError('default_vlan_id cannot be 4094, which the switch reserves')
+        # A parsed configuration leaves default_vlan_id None for VLAN 1, so a
+        # model says VLAN 1 the same way.
+        result['default_vlan_id'] = None if default_vlan == DEFAULT_VLAN else default_vlan
+    elif 'default_vlan_id' in managed:
+        managed.remove('default_vlan_id')
 
     for key, value in _require_mapping(model.get('system_max') or {}, 'system_max').items():
         if not isinstance(key, str) or not _SYSTEM_MAX_RE.match(key):
@@ -200,6 +217,9 @@ def normalize_model(model):
         name = vlan.get('name')
         if name is not None and (not isinstance(name, str) or not name or ' ' in name):
             raise FastIronConfigError('%s name must be a word without spaces, got %r' % (what, name))
+        if vid == (result['default_vlan_id'] or DEFAULT_VLAN) and untagged and 'default_vlan_id' in managed:
+            raise FastIronConfigError('%s is the default VLAN: leave out its untagged ports, which the switch '
+                                      'does not list' % what)
         ve = vlan.get('router_interface')
         result['vlans'][vid] = {'name': name, 'tagged': tagged, 'untagged': untagged,
                                 'router_interface': None if ve is None else _number(ve, what + ' router_interface')}
@@ -377,6 +397,9 @@ def config_drift(running, model, remove=None, protected_vlans=None):
     removable, protected = _removal_settings(current, want, remove, protected_vlans)
     findings = []
 
+    if 'default_vlan_id' in managed:
+        findings.extend(_default_vlan_drift(current, want))
+
     if 'system_max' in managed:
         for key, value in sorted(want['system_max'].items()):
             have = current['system_max'].get(key)
@@ -423,7 +446,9 @@ def config_drift(running, model, remove=None, protected_vlans=None):
                 findings.append(_finding('error', 'vlan_router_interface', obj,
                                          'VLAN %d router interface is ve %s, should be ve %s'
                                          % (vid, have['router_interface'], vlan['router_interface']), fixable))
-        for vid in sorted(set(current['vlans']) - set(want['vlans'])):
+        # The default VLAN always exists, whether or not the model lists it.
+        default_vlan = current.get('default_vlan_id') or DEFAULT_VLAN
+        for vid in sorted(set(current['vlans']) - set(want['vlans']) - {default_vlan}):
             findings.append(_finding('warning', 'vlan_unmanaged', 'vlan %d' % vid,
                                      'VLAN %d is not in the model' % vid, False))
 
@@ -476,6 +501,34 @@ def config_drift(running, model, remove=None, protected_vlans=None):
 
 
 _NO_INTERFACE = {'name': None, 'speed_duplex': None, 'dual_mode': False}
+
+
+def _default_vlan_fixable(current, want):
+    """Whether config_commands() sets the default VLAN: only on a switch still
+    on VLAN 1, and only when the new default VLAN isn't configured yet, as
+    FastIron won't make an existing VLAN the default.
+
+    The change takes effect at once and bounces every switchport, including
+    the ICL and any in-band management path."""
+    return current.get('default_vlan_id') is None and want['default_vlan_id'] not in current['vlans']
+
+
+def _default_vlan_drift(current, want):
+    have = current.get('default_vlan_id') or DEFAULT_VLAN
+    wanted = want['default_vlan_id'] or DEFAULT_VLAN
+    if have == wanted:
+        return []
+    fixable = _default_vlan_fixable(current, want)
+    note = ''
+    if current.get('default_vlan_id') is not None:
+        note = (' (changing it bounces every port and moves those without an untagged VLAN, so it is done by '
+                'hand)')
+    elif not fixable:
+        note = ' (VLAN %d is already configured, so it cannot become the default VLAN)' % wanted
+    if fixable:
+        note = ' (setting it bounces every port at once; set it from the console)'
+    return [_finding('error', 'default_vlan_id', 'default-vlan-id', 'default VLAN is %d, should be %d%s'
+                     % (have, wanted, note), fixable)]
 
 
 def _route_key(destination):
@@ -660,7 +713,8 @@ def config_commands(running, model):
     """Commands that make a running configuration (text or parsed) match a model, as far as adding goes.
 
     Returns configuration lines, nested blocks indented by one space, in the
-    order they can be applied: system-max settings, port names and speed-duplex
+    order they can be applied: the default VLAN (only on a switch still on
+    VLAN 1), system-max settings, port names and speed-duplex
     (ports must match before they are put in a LAG), LAGs, VLANs, dual-mode
     (which needs the port tagged in a VLAN), VE addresses, static routes
     (whose next hops are usually on a VE's subnet), clusters. A system-max setting only takes effect once the configuration is
@@ -671,6 +725,10 @@ def config_commands(running, model):
     current = _parsed(running)
     want, managed = normalize_model(model)
     lines = []
+
+    if 'default_vlan_id' in managed and want['default_vlan_id'] is not None and \
+            _default_vlan_fixable(current, want):
+        lines.append('default-vlan-id %d' % want['default_vlan_id'])
 
     if 'system_max' in managed:
         for key, value in sorted(want['system_max'].items()):
