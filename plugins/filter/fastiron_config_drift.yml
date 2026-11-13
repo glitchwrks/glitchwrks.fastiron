@@ -11,9 +11,13 @@ DOCUMENTATION:
     - Reports how a switch's running configuration differs from a model of its system-max settings, VLANs,
       LAGs, VE interface addresses, IPv4 static routes, MCT clusters and Ethernet interface settings. See P(glitchwrks.fastiron.fastiron_model_config#filter) for the model.
     - Only the sections the model has are compared. Within them, VLANs, LAGs, clusters and cluster clients
-      the switch has but the model does not are reported as warnings, as are system-max parameters the
+      the switch has but the model does not are reported as warnings, except the switch's default VLAN, which
+      always exists, as are system-max parameters the
       switch sets but the model does not, and static routes to destinations the model does not list. Only the
       interfaces, and the settings of each, that the model lists are compared.
+    - A different default VLAN is fixable only on a switch still using VLAN 1, and only when the new default
+      VLAN is not configured yet. Changing a default VLAN that was already moved, or moving it back to VLAN 1,
+      moves every port without an untagged VLAN, so it is reported for you to do by hand.
     - A static route's missing next hops are fixable. Extra next hops, including the old one when a route
       such as the default route moves to a new next hop, are reported but not fixable, because removing a
       route can cut the switch off from whoever is managing it, so it is done by hand.
